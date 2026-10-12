@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "piper-dynamics"
+version = "0.0.1"
+description = "Identified dynamics, external torque and payload estimation for the AgileX Piper arm."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Yujie Chen", email = "yujiechen690@gmail.com" }]
+keywords = [
+  "robotics", "piper", "agilex", "manipulator", "dynamics",
+  "pinocchio", "force-estimation", "external-torque", "payload-estimation",
+  "system-identification", "imitation-learning", "vla",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = [
+  "numpy>=1.24",
+  "pin>=2.7",          # Pinocchio rigid-body dynamics
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+hdf5 = ["h5py>=3.8"]                 # read/annotate ALOHA-style datasets
+can  = ["piper_sdk>=0.1"]            # live arm access, calibration data collection
+plot = ["matplotlib>=3.7"]           # calibration reports
+dev  = ["pytest>=7.4", "ruff>=0.5", "piper-dynamics[hdf5,plot]"]
+all  = ["piper-dynamics[hdf5,can,plot]"]
+
+[project.scripts]
+piper-calibrate = "piper_dynamics.cli:calibrate_main"
+piper-annotate  = "piper_dynamics.cli:annotate_main"
+piper-diagnose  = "piper_dynamics.cli:diagnose_main"
+
+[project.urls]
+Homepage = "https://github.com/Areache/piper-dynamics"
+Issues = "https://github.com/Areache/piper-dynamics/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/piper_dynamics"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

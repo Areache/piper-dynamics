@@ -1,0 +1,38 @@
+# Reference parameters -- PLACEHOLDER, NOT YET MEASURED.
+#
+# Every number below is a structurally valid placeholder so the schema and the
+# CLI can be exercised end to end. None of them has been measured on hardware.
+# Do not use this file to compute tau_ext on a real arm: run
+# `piper-calibrate` and produce your own.
+#
+# What it is for:
+#   - documenting the file format
+#   - `piper-diagnose` order-of-magnitude comparison, once real values land
+#
+# See params/README.md for how much unit-to-unit variation to expect.
+
+schema_version: 1
+current_unit: A
+
+provenance:
+  arm_id: PLACEHOLDER
+  model: piper
+  firmware: unknown
+  calibrated_by: unknown
+  calibrated_at: unknown
+  urdf_source: unknown
+  notes: >-
+    Placeholder values, not measured. Replace this whole file with the output
+    of `piper-calibrate --arm-id <your arm>`.
+  fit_rms_nm: null
+  n_samples: null
+
+joints:
+  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+
+inertial_overrides: {}
