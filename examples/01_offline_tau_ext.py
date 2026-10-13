@@ -17,7 +17,8 @@ p = argparse.ArgumentParser()
 p.add_argument("--urdf", required=True)
 p.add_argument("--params", required=True)
 p.add_argument("--episode", required=True)
-p.add_argument("--current-key", default="observations/effort")
+p.add_argument("--current-key", default="observations/motor_current")
+p.add_argument("--arm", choices=("left", "right"), help="bimanual recording: which arm")
 args = p.parse_args()
 
 # %% What is actually in this file?
@@ -31,7 +32,7 @@ for w in params.warnings():
     print("warning:", w)
 
 est = TauExtEstimator(model, params, quasi_static=True)
-q, v, current = read_episode(args.episode, current_key=args.current_key, n_joints=6)
+q, v, current = read_episode(args.episode, current_key=args.current_key, n_joints=6, arm=args.arm)
 print(f"{len(q)} samples, {q.shape[1]} joints")
 
 # %% Decompose

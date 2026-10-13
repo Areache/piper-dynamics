@@ -119,7 +119,9 @@ PIPER_URDF=/path/to/piper.urdf pytest
 **Not done yet**
 - the reference calibration in `params/piper_reference.yaml` is a placeholder,
   not a measurement
-- `io/can.py` SDK field names are untested against hardware
+- `io/can.py`: field names and unit scales are verified against piper_sdk
+  0.6.2 by a passive read on two arms; `move_j` is implemented but has not
+  yet been run on hardware
 - dynamic identification of inertial parameters (`identify_full`) — static
   identification plus `quasi_static=True` is the supported path
 - `docs/validation.md` describes the known-weight validation; the measured

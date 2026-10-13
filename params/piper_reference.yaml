@@ -1,7 +1,10 @@
-# Reference parameters -- PLACEHOLDER, NOT YET MEASURED.
+# Reference parameters -- NOMINAL, NOT YET MEASURED.
 #
-# Every number below is a structurally valid placeholder so the schema and the
-# CLI can be exercised end to end. None of them has been measured on hardware.
+# kt is the fixed current-to-torque coefficient piper_sdk 0.6.2 uses to derive
+# its `effort` field (1.18125 N·m/A on joints 1-3, 0.95844 on joints 4-6),
+# confirmed bit-exact against live readings on two arms. It is the vendor's
+# nominal value, not a measurement of any arm. direction, offsets and friction
+# are placeholders.
 # Do not use this file to compute tau_ext on a real arm: run
 # `piper-calibrate` and produce your own.
 #
@@ -15,24 +18,24 @@ schema_version: 1
 current_unit: A
 
 provenance:
-  arm_id: PLACEHOLDER
+  arm_id: NOMINAL
   model: piper
   firmware: unknown
   calibrated_by: unknown
   calibrated_at: unknown
   urdf_source: unknown
   notes: >-
-    Placeholder values, not measured. Replace this whole file with the output
-    of `piper-calibrate --arm-id <your arm>`.
+    kt = piper_sdk 0.6.2 nominal coefficients; everything else placeholder.
+    Not measured. Replace with the output of `piper-calibrate --arm-id <your arm>`.
   fit_rms_nm: null
   n_samples: null
 
 joints:
-  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
-  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
-  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
-  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
-  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
-  - { kt: 1.0, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.18125, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.18125, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 1.18125, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 0.95844, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 0.95844, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
+  - { kt: 0.95844, direction: 1, current_offset: 0.0, fc: 0.0, fv: 0.0, fs: 0.0 }
 
 inertial_overrides: {}

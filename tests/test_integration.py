@@ -127,7 +127,12 @@ def test_wrench_recovers_applied_force(rig):
 
     model, _ = rig
     rng = np.random.default_rng(3)
-    q = rng.uniform(-0.5, 0.5, model.nq)
+    # Conditioning depends on the geometry (real URDFs via PIPER_URDF), and
+    # this test is about recovery, not about where the singularities are.
+    for _ in range(100):
+        q = rng.uniform(-0.5, 0.5, model.nq)
+        if np.linalg.cond(model.jacobian(q).T) < 1e2:
+            break
     F = np.array([2.0, -1.0, 3.5, 0.1, -0.2, 0.05])
     tau_ext = -model.jacobian(q).T @ F
     out = wrench_from_tau_ext(model, q, tau_ext)

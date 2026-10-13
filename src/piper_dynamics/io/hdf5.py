@@ -8,14 +8,18 @@ fields that are already there.
 Layout assumed (the ALOHA/ACT convention, as produced by the common Piper
 teleop recorders)::
 
-    /observations/qpos          (T, nq)
-    /observations/qvel          (T, nq)
-    /observations/effort        (T, nq)      <- or motor_current, see below
-    /action                     (T, nq)
+    /observations/qpos          (T, 14)      left j0..j5, left gripper, right j0..j5, right gripper
+    /observations/qvel          (T, 14)
+    /observations/motor_current (T, 12)      left j0..j5, right j0..j5 -- A
+    /observations/effort        (T, 14)      see below
+    /action                     (T, 14)
 
 The current field is the one that varies most between recorders, which is why
-``current_key`` is explicit. Check what yours contains before trusting the
-output: ``inspect(path)`` prints the tree.
+``current_key`` is explicit. On piper-aio recordings ``observations/effort`` is
+all zeros for the arm joints (the ROS driver fills only the gripper slot), so
+the default is ``motor_current``; ``motor_torque`` there is the same current
+times a fixed SDK coefficient, not an independent measurement. Check what
+yours contains before trusting the output: ``inspect(path)`` prints the tree.
 """
 
 from __future__ import annotations
@@ -52,27 +56,44 @@ def inspect(path: str | Path) -> dict[str, Any]:
     return out
 
 
+#: First column of each arm in a bimanual piper-aio recording: (qpos/qvel, current).
+#: qpos carries a gripper slot per arm, motor_current does not.
+BIMANUAL_COLUMNS = {"left": (0, 0), "right": (7, 6)}
+
+
 def read_episode(
     path: str | Path,
     qpos_key: str = "observations/qpos",
     qvel_key: str = "observations/qvel",
-    current_key: str = "observations/effort",
+    current_key: str = "observations/motor_current",
     n_joints: int | None = 6,
+    arm: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return ``(q, v, current)``, each ``(T, n_joints)``.
 
-    ``n_joints`` slices off the gripper (and, for a bimanual recording, you
-    will want to call this twice with different slices -- a 14-dim ALOHA
-    action is two arms, and feeding both to a 6-DOF model silently produces
-    garbage).
+    ``n_joints`` slices off the gripper. For a bimanual recording pass
+    ``arm="left"`` or ``"right"``: feeding both arms to a 6-DOF model silently
+    produces garbage, and the two arms start at different columns in qpos and
+    in motor_current (see ``BIMANUAL_COLUMNS``).
+
+    Raises if the selected current columns are all zero, which is what an
+    unpopulated ``effort`` field looks like.
     """
     _require_h5py()
     with h5py.File(path, "r") as f:
         q = np.asarray(f[qpos_key][()], dtype=float)
         v = np.asarray(f[qvel_key][()], dtype=float)
         c = np.asarray(f[current_key][()], dtype=float)
+    q0, c0 = (0, 0) if arm is None else BIMANUAL_COLUMNS[arm]
     if n_joints is not None:
-        q, v, c = q[:, :n_joints], v[:, :n_joints], c[:, :n_joints]
+        q, v, c = q[:, q0:q0 + n_joints], v[:, q0:q0 + n_joints], c[:, c0:c0 + n_joints]
+    elif arm is not None:
+        raise ValueError("arm selection needs n_joints")
+    if c.size and not c.any():
+        raise ValueError(
+            f"{current_key} is all zeros for the selected joints in {path}. "
+            f"On piper-aio recordings use observations/motor_current."
+        )
     return q, v, c
 
 
@@ -97,7 +118,8 @@ def annotate_episode(
     q, v, c = read_episode(path, **read_kw)
     tau_ext = estimator.batch(q, v, c)
 
-    if out_path != path:
+    # Copy only once, so annotating the second arm adds to the first arm's output.
+    if out_path != path and not out_path.exists():
         import shutil
         shutil.copy2(path, out_path)
 

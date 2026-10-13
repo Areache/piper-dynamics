@@ -51,20 +51,41 @@ class PiperModel:
     gravity
         World-frame gravity. Override for a non-upright mount -- and only here,
         never also in the URDF.
+    locked_joints
+        Joints to freeze at their neutral position so the model has one DOF
+        per motor. AgileX descriptions model the two gripper fingers as
+        prismatic ``joint7``/``joint8``; left in, they make the model 8-DOF
+        and no 6-joint parameter file matches it. The default locks those two
+        when present, lumping the fingers into ``link6`` at the closed
+        position. Pass ``()`` to keep every joint.
     """
+
+    #: Gripper finger joints in AgileX Piper descriptions.
+    DEFAULT_LOCKED = ("joint7", "joint8")
 
     def __init__(
         self,
         urdf_path: str | Path,
         ee_frame: str = "link6",
         gravity: np.ndarray | None = None,
+        locked_joints: tuple[str, ...] | list[str] | None = None,
     ) -> None:
         pin = _require_pin()
         urdf_path = Path(urdf_path)
         if not urdf_path.exists():
             raise FileNotFoundError(f"URDF not found: {urdf_path}")
         self.urdf_path = urdf_path
-        self.model = pin.buildModelFromUrdf(str(urdf_path))
+        model = pin.buildModelFromUrdf(str(urdf_path))
+        if locked_joints is None:
+            locked_joints = [n for n in self.DEFAULT_LOCKED if model.existJointName(n)]
+        missing = [n for n in locked_joints if not model.existJointName(n)]
+        if missing:
+            raise ValueError(f"cannot lock {missing}: not joints of this URDF")
+        if locked_joints:
+            ids = [model.getJointId(n) for n in locked_joints]
+            model = pin.buildReducedModel(model, ids, pin.neutral(model))
+        self.locked_joints = tuple(locked_joints)
+        self.model = model
         self.data = self.model.createData()
         self.model.gravity.linear = np.asarray(
             GRAVITY_WORLD if gravity is None else gravity, dtype=float
