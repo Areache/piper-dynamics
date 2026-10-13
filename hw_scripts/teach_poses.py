@@ -49,7 +49,7 @@ def main() -> None:
 
     from piper_sdk import C_PiperInterface_V2
 
-    out = args.out or Path(f"hw_results/T3/poses_{args.can_interface}.json")
+    out = args.out or Path(f".hw/results/T3/poses_{args.can_interface}.json")
     if out.exists():
         p.error(f"{out} exists; pick a new --out rather than overwriting taught poses")
     sdk = C_PiperInterface_V2(args.can_interface)

@@ -15,7 +15,7 @@ record --hold-s of joint angle, speed and current at --rate-hz. Writes
 Any error or Ctrl-C stops sending commands immediately; the arm holds its last
 target. It does not return to the start pose on its own.
 
-    python hw_scripts/collect_poses.py can_right hw_results/T3/poses_can_right.json \
+    python hw_scripts/collect_poses.py can_right .hw/results/T3/poses_can_right.json \
         --indices 0,3 --confirm-each --operator-confirmed
 """
 
