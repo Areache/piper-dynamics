@@ -122,3 +122,43 @@ def test_inertial_params_roundtrip(model):
     before = model.gravity_torque(q)
     model.set_inertial_params(phi)
     np.testing.assert_allclose(model.gravity_torque(q), before, atol=1e-9)
+
+
+def _overrides(links, phi, order):
+    # Scale every link differently so a positional mix-up cannot go unnoticed.
+    return {links[i]: (phi[i] * (1.0 + 0.1 * i)).tolist() for i in order}
+
+
+def test_moving_links_are_one_per_joint(model):
+    links = model.moving_links()
+    assert len(links) == model.nv
+    assert len(set(links)) == len(links)
+
+
+def test_inertial_overrides_are_matched_by_name_not_order(model):
+    links = model.moving_links()
+    phi = model.inertial_params().reshape(len(links), 10)
+    q = np.full(model.nq, 0.3)
+    model.set_inertial_overrides(_overrides(links, phi, range(len(links))))
+    in_order = model.gravity_torque(q)
+    model.set_inertial_overrides(_overrides(links, phi, reversed(range(len(links)))))
+    np.testing.assert_allclose(model.gravity_torque(q), in_order, atol=1e-12)
+
+
+def test_inertial_overrides_reject_missing_unknown_and_lumped_links(model):
+    links = model.moving_links()
+    good = _overrides(links, model.inertial_params().reshape(len(links), 10), range(len(links)))
+    missing = dict(list(good.items())[1:])
+    with pytest.raises(ValueError, match="missing"):
+        model.set_inertial_overrides(missing)
+    with pytest.raises(ValueError, match="not links of this URDF"):
+        model.set_inertial_overrides({**good, "no_such_link": [0.0] * 10})
+    from piper_dynamics.model import _frame_parents
+
+    root = next(f.name for f in model.model.frames  # a link fixed to the world
+                if f.type == pin.FrameType.BODY and _frame_parents(f)[0] == 0)
+    with pytest.raises(ValueError, match="without their own parameters"):
+        model.set_inertial_overrides({**good, root: [0.0] * 10})
+    first = next(iter(good))
+    with pytest.raises(ValueError, match="10 values"):
+        model.set_inertial_overrides({**good, first: [1.0] * 4})

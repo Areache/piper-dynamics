@@ -37,6 +37,13 @@ def _require_pin():
     return pin
 
 
+def _frame_parents(frame) -> tuple[int, int]:
+    """``(parent joint, parent frame)``; Pinocchio 3 renamed both attributes."""
+    if hasattr(frame, "parentJoint"):
+        return frame.parentJoint, frame.parentFrame
+    return frame.parent, frame.previousFrame
+
+
 class PiperModel:
     """Kinematics and dynamics of one arm.
 
@@ -163,6 +170,56 @@ class PiperModel:
         """Current inertial parameter vector ``phi``, as in the regressor."""
         return np.concatenate([self.model.inertias[i].toDynamicParameters()
                                for i in range(1, self.model.njoints)])
+
+    def moving_links(self) -> list[str]:
+        """URDF link carried by each joint, in joint order.
+
+        These are the keys of ``ArmParams.inertial_overrides``. A link welded
+        on by a fixed joint, or a locked gripper finger, is lumped into the
+        link it hangs from and has no inertial parameters of its own.
+        """
+        body = pin.FrameType.BODY
+        names = []
+        for i in range(1, self.model.njoints):
+            joint_frame = self.model.getFrameId(self.model.names[i], pin.FrameType.JOINT)
+            carried = [f.name for f in self.model.frames
+                       if f.type == body and _frame_parents(f) == (i, joint_frame)]
+            if len(carried) != 1:
+                raise ValueError(
+                    f"joint {self.model.names[i]!r} carries links {carried}; expected exactly one"
+                )
+            names.append(carried[0])
+        return names
+
+    def set_inertial_overrides(self, overrides: dict[str, list[float]]) -> None:
+        """Write per-link inertial parameters, looked up by URDF link name.
+
+        Every moving link must be present, and nothing else: a partial or
+        misnamed set raises instead of being matched by position, because a
+        positional match moves parameters onto the wrong link without a sound.
+        """
+        links = self.moving_links()
+        unknown = sorted(k for k in overrides if not self.model.existBodyName(k))
+        lumped = sorted(k for k in overrides if k not in links and k not in unknown)
+        missing = [k for k in links if k not in overrides]
+        problems = []
+        if unknown:
+            problems.append(f"not links of this URDF: {unknown}")
+        if lumped:
+            problems.append(f"links without their own parameters (fixed or locked): {lumped}")
+        if missing:
+            problems.append(f"missing: {missing}")
+        bad = {k: np.asarray(v).shape for k, v in overrides.items()
+               if k in links and np.asarray(v).shape != (10,)}
+        if bad:
+            problems.append(f"expected 10 values per link, got shapes {bad}")
+        if problems:
+            raise ValueError(
+                "inertial_overrides must name every moving link exactly once "
+                f"({links}). " + "; ".join(problems)
+            )
+        self.set_inertial_params(np.concatenate([np.asarray(overrides[k], dtype=float)
+                                                 for k in links]))
 
     def set_inertial_params(self, phi: np.ndarray) -> None:
         """Write an identified ``phi`` back into the model."""

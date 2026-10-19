@@ -79,9 +79,7 @@ class TauExtEstimator:
         self.quasi_static = quasi_static
         if params.inertial_overrides:
             # Identified inertias take precedence over the URDF's CAD values.
-            phi = np.concatenate([np.asarray(v, dtype=float)
-                                  for v in params.inertial_overrides.values()])
-            model.set_inertial_params(phi)
+            model.set_inertial_overrides(params.inertial_overrides)
 
     def __call__(
         self,
