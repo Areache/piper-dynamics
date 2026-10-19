@@ -98,9 +98,10 @@ def annotate_main(argv: list[str] | None = None) -> int:
     _add_model_args(p)
     p.add_argument("--params", required=True, help="your calibrated parameter file")
     p.add_argument("episodes", nargs="+", help="hdf5 episode files (globs expanded by the shell)")
-    p.add_argument("--current-key", default="observations/effort")
-    p.add_argument("--n-joints", type=int, default=6,
-                   help="joints to slice; for a bimanual recording run once per arm")
+    p.add_argument("--current-key", default="observations/motor_current")
+    p.add_argument("--n-joints", type=int, default=6, help="joints to slice")
+    p.add_argument("--arm", choices=("left", "right"),
+                   help="bimanual recording: which arm; writes observations/tau_ext_<arm>")
     p.add_argument("--quasi-static", action="store_true",
                    help="ignore velocity/acceleration terms (recommended for static-only calib)")
     p.add_argument("--in-place", action="store_true")
@@ -120,8 +121,10 @@ def annotate_main(argv: list[str] | None = None) -> int:
         out = annotate_episode(
             ep, est,
             out_path=ep if args.in_place else None,
+            tau_ext_key=f"observations/tau_ext_{args.arm}" if args.arm else "observations/tau_ext",
             current_key=args.current_key,
             n_joints=args.n_joints,
+            arm=args.arm,
             overwrite=args.overwrite,
         )
         print(f"{ep} -> {out}")
