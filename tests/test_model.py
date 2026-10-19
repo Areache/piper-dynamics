@@ -5,6 +5,8 @@ Runs against the toy URDF in ``tests/fixtures`` by default. Set ``PIPER_URDF``
 Piper description -- worth doing once when you first set up an arm.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -162,3 +164,48 @@ def test_inertial_overrides_reject_missing_unknown_and_lumped_links(model):
     first = next(iter(good))
     with pytest.raises(ValueError, match="10 values"):
         model.set_inertial_overrides({**good, first: [1.0] * 4})
+
+
+def test_gravity_regressor_reproduces_gravity(model):
+    q = np.random.default_rng(5).uniform(-0.5, 0.5, model.nq)
+    priors = np.concatenate([s.prior for s in model.link_specs()])
+    np.testing.assert_allclose(model.gravity_regressor(q) @ priors, model.gravity_torque(q),
+                               atol=1e-9)
+
+
+def test_link_specs_accept_the_urdf_itself(model, urdf_path):
+    from piper_dynamics.calibration.feasibility import BOX_SOURCES, ParamSet, Verdict, audit
+
+    specs = model.link_specs()
+    assert [s.name for s in specs] == model.moving_links()
+    assert all(s.box_source in BOX_SOURCES for s in specs)
+    assert specs[-1].gripper is not None and all(s.gripper is None for s in specs[:-1])
+    urdf = ParamSet(tuple(s.name for s in specs), np.array([s.prior for s in specs]), units="SI")
+    assert audit(urdf, specs).verdict is Verdict.FEASIBLE
+    if urdf_path.endswith("toy6.urdf"):
+        assert [s.box_source for s in specs[:3]] == ["kinematic-fallback", "mesh", "mesh"]
+
+
+def test_estimator_warns_on_unphysical_overrides_but_still_runs(model):
+    from test_params import make_params
+
+    from piper_dynamics import TauExtEstimator
+
+    links = model.moving_links()
+    phi = model.inertial_params().reshape(len(links), 10)
+    good = {name: phi[i].tolist() for i, name in enumerate(links)}
+    bad = dict(good)
+    bad[links[1]] = [phi[1, 0], phi[1, 0] * 1.0, 0.0, 0.0, *phi[1, 4:]]   # com 1 m out
+    params = make_params(model.nv)
+
+    params.inertial_overrides = bad
+    with pytest.warns(UserWarning, match="POINTWISE_VIOLATION"):
+        est = TauExtEstimator(model, params, quasi_static=True)
+    z = np.zeros(model.nv)
+    assert np.isfinite(est(z, z, z)).all()
+
+    model.set_inertial_params(phi.reshape(-1))     # back to the URDF priors
+    params.inertial_overrides = good
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        TauExtEstimator(model, params, quasi_static=True)

@@ -32,8 +32,9 @@ dependencies = [
 hdf5 = ["h5py>=3.8"]                 # read/annotate ALOHA-style datasets
 can  = ["piper_sdk>=0.1"]            # live arm access, calibration data collection
 plot = ["matplotlib>=3.7"]           # calibration reports
-dev  = ["pytest>=7.4", "ruff>=0.5", "piper-dynamics[hdf5,plot]"]
-all  = ["piper-dynamics[hdf5,can,plot]"]
+fit  = ["scipy>=1.10"]               # feasibility projection of fitted link parameters
+dev  = ["pytest>=7.4", "ruff>=0.5", "piper-dynamics[hdf5,plot,fit]"]
+all  = ["piper-dynamics[hdf5,can,plot,fit]"]
 
 [project.scripts]
 piper-calibrate = "piper_dynamics.cli:calibrate_main"

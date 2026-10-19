@@ -166,6 +166,75 @@ class PiperModel:
         q, v, a = (np.asarray(x, dtype=float) for x in (q, v, a))
         return pin.computeJointTorqueRegressor(self.model, self.data, q, v, a).copy()
 
+    def gravity_regressor(self, q: np.ndarray) -> np.ndarray:
+        """``nv x (4*njoints)``: ``g(q) = Y @ phi_g`` with ``phi_g`` stacking
+        each link's ``[m, m*cx, m*cy, m*cz]``, the only parameters a static
+        pose sees. Column order matches `link_specs`."""
+        z = np.zeros(self.nv)
+        Y = self.joint_torque_regressor(q, z, z)
+        return Y.reshape(self.nv, -1, 10)[:, :, :4].reshape(self.nv, -1)
+
+    def link_specs(self, package_dirs: list[str] | None = None, gripper=None) -> list:
+        """`calibration.feasibility.LinkSpec` for every moving link.
+
+        The centre-of-mass box comes from the URDF collision geometry when it
+        can be loaded (``package_dirs`` resolves ``package://`` meshes), and
+        otherwise from the link's joint origins (``kinematic-fallback``). The
+        end link gets a gripper allowance (default `GripperAllowance()`),
+        because a fit lumps whatever the URDF leaves out into it.
+        """
+        from .calibration.feasibility import UNITS, GripperAllowance, LinkSpec, kinematic_box
+
+        boxes = self._geometry_boxes(package_dirs)
+        specs = []
+        for i, name in enumerate(self.moving_links(), start=1):
+            prior = self.model.inertias[i].toDynamicParameters()[:4]
+            com = prior[1:] / prior[0] if prior[0] > 0 else None
+            if i in boxes:
+                lo, hi = boxes[i]
+                if com is not None:
+                    lo, hi = np.minimum(lo, com), np.maximum(hi, com)
+                source = "mesh"
+            else:
+                carried = [self.model.jointPlacements[j].translation
+                           for j in range(1, self.model.njoints) if self.model.parents[j] == i]
+                carried += [f.placement.translation for f in self.model.frames
+                            if _frame_parents(f)[0] == i]
+                lo, hi = kinematic_box(np.array(carried).reshape(-1, 3), com)
+                source = "kinematic-fallback"
+            end = i == self.model.njoints - 1
+            specs.append(LinkSpec(name, prior, lo, hi, source, units=UNITS,
+                                  gripper=(gripper or GripperAllowance()) if end else None))
+        return specs
+
+    def _geometry_boxes(self, package_dirs) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+        """Collision-geometry bounding box per joint, in the joint frame.
+        Empty when the geometry cannot be loaded (meshes not found, no
+        collision library); the caller then falls back to kinematics."""
+        try:
+            full = pin.buildModelFromUrdf(str(self.urdf_path))
+            kw = {"package_dirs": package_dirs} if package_dirs else {}
+            geom = pin.buildGeomFromUrdf(full, str(self.urdf_path),
+                                         pin.GeometryType.COLLISION, **kw)
+            if self.locked_joints:
+                ids = [full.getJointId(n) for n in self.locked_joints]
+                _, geom = pin.buildReducedModel(full, geom, ids, pin.neutral(full))
+            boxes: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+            for obj in geom.geometryObjects:
+                obj.geometry.computeLocalAABB()
+                lo = np.asarray(obj.geometry.aabb_local.min_)
+                hi = np.asarray(obj.geometry.aabb_local.max_)
+                corners = np.array([[x, y, z] for x in (lo[0], hi[0])
+                                    for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+                pts = corners @ obj.placement.rotation.T + obj.placement.translation
+                j = obj.parentJoint
+                if j in boxes:
+                    pts = np.vstack([pts, *boxes[j]])
+                boxes[j] = (pts.min(axis=0), pts.max(axis=0))
+            return boxes
+        except Exception:  # noqa: BLE001 -- any failure means "no geometry"
+            return {}
+
     def inertial_params(self) -> np.ndarray:
         """Current inertial parameter vector ``phi``, as in the regressor."""
         return np.concatenate([self.model.inertias[i].toDynamicParameters()

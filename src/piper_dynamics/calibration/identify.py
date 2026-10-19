@@ -34,6 +34,7 @@ if TYPE_CHECKING:  # avoid importing pinocchio to use the rest of the package
 
 from ..params import ArmParams, JointParams, Provenance
 from .collect import CalibrationSamples
+from .feasibility import FeasibilityReport
 
 
 @dataclass
@@ -44,6 +45,9 @@ class IdentificationReport:
     r2: np.ndarray                   # (nq,) coefficient of determination
     condition_number: float
     procedure: str
+    #: Physical feasibility of identified link mass parameters; None when the
+    #: procedure identifies none (``identify_static`` fits kt and offsets only).
+    feasibility: FeasibilityReport | None = None
 
     def summary(self) -> str:
         lines = [f"identification: {self.procedure}", ""]
@@ -60,6 +64,11 @@ class IdentificationReport:
                 f"WARNING joints {bad.tolist()} have residuals above 0.5 N·m. "
                 f"tau_ext on those joints will be model error, not physics."
             )
+        if self.feasibility is None:
+            lines.append("physical feasibility: not applicable -- this procedure fits kt and "
+                         "current offsets, no link mass parameters.")
+        else:
+            lines.append(self.feasibility.headline())
         return "\n".join(lines)
 
 
