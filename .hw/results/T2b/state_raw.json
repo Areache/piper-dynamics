@@ -1,0 +1,220 @@
+{
+  "can_left": {
+    "joint_ctrl": {
+      "joint_1_6_001deg": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "time_stamp": 0,
+      "Hz": 0
+    },
+    "mode_ctrl": {
+      "ctrl_mode": 1,
+      "move_mode": 1,
+      "move_spd_rate_ctrl": 50,
+      "mit_mode": 0,
+      "residence_time": 0,
+      "installation_pos": 0,
+      "time_stamp": 0,
+      "Hz": 0.0
+    },
+    "ctrl_151": {
+      "ctrl_mode": 1,
+      "move_mode": 1,
+      "move_spd_rate_ctrl": 50,
+      "mit_mode": 0,
+      "time_stamp": 0,
+      "Hz": 0.0
+    },
+    "joint_feedback": {
+      "joint_1_6_001deg": [
+        -5535,
+        60,
+        956,
+        29256,
+        4431,
+        -1267
+      ],
+      "time_stamp": 1792381509.5412345,
+      "Hz": 203.333
+    },
+    "arm_status": {
+      "ctrl_mode": 1,
+      "arm_status": 0,
+      "mode_feed": 1,
+      "teach_status": 0,
+      "motion_status": 1,
+      "trajectory_num": 0,
+      "err_code": 0,
+      "time_stamp": 1792381509.5404844,
+      "Hz": 200.0
+    },
+    "enable_status": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "gripper": {
+      "angle_001mm": -2700,
+      "effort_001Nm": -1047,
+      "status_code": 64,
+      "time_stamp": 1792381509.5413241,
+      "Hz": 200.0
+    },
+    "firmware_version_passive": -1199,
+    "low_spd": {
+      "motor_1": {
+        "vol_01V": 230,
+        "foc_temp_C": 41,
+        "motor_temp_C": 34,
+        "bus_current_001A": 0
+      },
+      "motor_2": {
+        "vol_01V": 230,
+        "foc_temp_C": 41,
+        "motor_temp_C": 34,
+        "bus_current_001A": 0
+      },
+      "motor_3": {
+        "vol_01V": 230,
+        "foc_temp_C": 50,
+        "motor_temp_C": 44,
+        "bus_current_001A": 0
+      },
+      "motor_4": {
+        "vol_01V": 230,
+        "foc_temp_C": 53,
+        "motor_temp_C": 51,
+        "bus_current_001A": 0
+      },
+      "motor_5": {
+        "vol_01V": 230,
+        "foc_temp_C": 47,
+        "motor_temp_C": 39,
+        "bus_current_001A": 0
+      },
+      "motor_6": {
+        "vol_01V": 230,
+        "foc_temp_C": 46,
+        "motor_temp_C": 40,
+        "bus_current_001A": 0
+      }
+    }
+  },
+  "can_right": {
+    "joint_ctrl": {
+      "joint_1_6_001deg": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "time_stamp": 0,
+      "Hz": 0
+    },
+    "mode_ctrl": {
+      "ctrl_mode": 1,
+      "move_mode": 1,
+      "move_spd_rate_ctrl": 50,
+      "mit_mode": 0,
+      "residence_time": 0,
+      "installation_pos": 0,
+      "time_stamp": 0,
+      "Hz": 0.0
+    },
+    "ctrl_151": {
+      "ctrl_mode": 1,
+      "move_mode": 1,
+      "move_spd_rate_ctrl": 50,
+      "mit_mode": 0,
+      "time_stamp": 0,
+      "Hz": 0.0
+    },
+    "joint_feedback": {
+      "joint_1_6_001deg": [
+        8082,
+        0,
+        653,
+        6552,
+        17002,
+        0
+      ],
+      "time_stamp": 1792381512.5527341,
+      "Hz": 200.0
+    },
+    "arm_status": {
+      "ctrl_mode": 1,
+      "arm_status": 0,
+      "mode_feed": 1,
+      "teach_status": 0,
+      "motion_status": 1,
+      "trajectory_num": 0,
+      "err_code": 0,
+      "time_stamp": 1792381512.552198,
+      "Hz": 200.0
+    },
+    "enable_status": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "gripper": {
+      "angle_001mm": -2300,
+      "effort_001Nm": -249,
+      "status_code": 64,
+      "time_stamp": 1792381512.5480762,
+      "Hz": 200.0
+    },
+    "firmware_version_passive": -1199,
+    "low_spd": {
+      "motor_1": {
+        "vol_01V": 230,
+        "foc_temp_C": 42,
+        "motor_temp_C": 34,
+        "bus_current_001A": 0
+      },
+      "motor_2": {
+        "vol_01V": 230,
+        "foc_temp_C": 42,
+        "motor_temp_C": 35,
+        "bus_current_001A": 0
+      },
+      "motor_3": {
+        "vol_01V": 230,
+        "foc_temp_C": 48,
+        "motor_temp_C": 42,
+        "bus_current_001A": 0
+      },
+      "motor_4": {
+        "vol_01V": 240,
+        "foc_temp_C": 50,
+        "motor_temp_C": 46,
+        "bus_current_001A": 0
+      },
+      "motor_5": {
+        "vol_01V": 230,
+        "foc_temp_C": 45,
+        "motor_temp_C": 39,
+        "bus_current_001A": 0
+      },
+      "motor_6": {
+        "vol_01V": 230,
+        "foc_temp_C": 44,
+        "motor_temp_C": 38,
+        "bus_current_001A": 0
+      }
+    }
+  }
+}

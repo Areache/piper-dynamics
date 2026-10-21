@@ -89,6 +89,7 @@ variation on low-cost arms is larger than the signal being measured —
 | `estimate_payload_mass` | how heavy is the thing in the gripper — analytic least squares, no learning |
 | `PiperModel` | FK, Jacobians, RNEA, inertial regressor (thin Pinocchio wrapper) |
 | `piper-calibrate` | identification + a residual report you can read |
+| `calibration.audit` / `project` | physical-feasibility gate for fitted link mass parameters -- see [`docs/feasibility.md`](docs/feasibility.md) |
 
 Read [`conventions.py`](src/piper_dynamics/conventions.py) before interpreting
 any sign. It is short, and every sign error in this kind of code comes from an

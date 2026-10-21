@@ -1,0 +1,168 @@
+{
+  "can_left": {
+    "channel": "can_left",
+    "joint_1": {
+      "samples": 1950,
+      "current_A_median": 0.032,
+      "torque_Nm_median": 0.1512,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 41.0,
+        "motor_temp_C": 34.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_2": {
+      "samples": 1950,
+      "current_A_median": 0.27,
+      "torque_Nm_median": 1.1162812500000001,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 41.0,
+        "motor_temp_C": 34.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_3": {
+      "samples": 1950,
+      "current_A_median": -1.546,
+      "torque_Nm_median": -7.30485,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 50.0,
+        "motor_temp_C": 45.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_4": {
+      "samples": 1950,
+      "current_A_median": -1.329,
+      "torque_Nm_median": -1.6375956287039999,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 53.0,
+        "motor_temp_C": 51.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_5": {
+      "samples": 1950,
+      "current_A_median": -0.032,
+      "torque_Nm_median": -0.024920643686400002,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 47.0,
+        "motor_temp_C": 39.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_6": {
+      "samples": 1950,
+      "current_A_median": -0.041,
+      "torque_Nm_median": -0.0319295747232,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 46.0,
+        "motor_temp_C": 40.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "torque_over_current_median_ratio": {
+      "1": 4.725,
+      "2": 4.134375,
+      "3": 4.725,
+      "4": 1.232201376,
+      "5": 0.7787701152000001,
+      "6": 0.7787701152000001
+    }
+  },
+  "can_right": {
+    "channel": "can_right",
+    "joint_1": {
+      "samples": 1948,
+      "current_A_median": 0.0,
+      "torque_Nm_median": 0.0,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 42.0,
+        "motor_temp_C": 34.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_2": {
+      "samples": 1948,
+      "current_A_median": 0.278,
+      "torque_Nm_median": 1.1493562500000003,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 41.0,
+        "motor_temp_C": 34.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_3": {
+      "samples": 1947,
+      "current_A_median": -1.377,
+      "torque_Nm_median": -6.5063249999999995,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 48.0,
+        "motor_temp_C": 43.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_4": {
+      "samples": 1947,
+      "current_A_median": -1.031,
+      "torque_Nm_median": -1.2703996186559998,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 24.0,
+        "foc_temp_C": 50.0,
+        "motor_temp_C": 45.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_5": {
+      "samples": 1947,
+      "current_A_median": -0.048,
+      "torque_Nm_median": -0.037380965529600005,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 45.0,
+        "motor_temp_C": 38.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "joint_6": {
+      "samples": 1947,
+      "current_A_median": 0.005,
+      "torque_Nm_median": 0.0038938505759999998,
+      "velocity_rad_s_median": 0.0,
+      "driver_state": {
+        "vol_V": 23.0,
+        "foc_temp_C": 44.0,
+        "motor_temp_C": 38.0,
+        "bus_current_A": 0.0
+      }
+    },
+    "torque_over_current_median_ratio": {
+      "1": null,
+      "2": 4.134375,
+      "3": 4.725,
+      "4": 1.232201376,
+      "5": 0.7787701152000001,
+      "6": 0.7787701152
+    }
+  }
+}

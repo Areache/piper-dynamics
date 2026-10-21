@@ -9,6 +9,7 @@ interpreting the output.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ import numpy as np
 if TYPE_CHECKING:  # avoid importing pinocchio to use the rest of the package
     from ..model import PiperModel
 
+from ..calibration.feasibility import ParamSet, Verdict, audit
 from ..params import ArmParams
 from .friction import DEFAULT_EPS, friction_torque
 
@@ -79,9 +81,15 @@ class TauExtEstimator:
         self.quasi_static = quasi_static
         if params.inertial_overrides:
             # Identified inertias take precedence over the URDF's CAD values.
-            phi = np.concatenate([np.asarray(v, dtype=float)
-                                  for v in params.inertial_overrides.values()])
-            model.set_inertial_params(phi)
+            # They are audited against the URDF (specs taken before the
+            # overwrite): a warning, never a block.
+            specs = model.link_specs()
+            model.set_inertial_overrides(params.inertial_overrides)
+            report = audit(ParamSet.from_inertial_overrides(params.inertial_overrides,
+                                                            [s.name for s in specs]), specs)
+            if report.verdict is not Verdict.FEASIBLE:
+                warnings.warn(report.headline() + " Run piper-diagnose --urdf for details.",
+                              stacklevel=2)
 
     def __call__(
         self,

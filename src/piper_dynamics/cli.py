@@ -139,6 +139,8 @@ def diagnose_main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--params", required=True)
     p.add_argument("--reference", default=str(REFERENCE_PARAMS))
+    p.add_argument("--urdf", help="URDF to audit inertial_overrides against")
+    p.add_argument("--ee-frame", default="link6", help="end-effector frame name in the URDF")
     args = p.parse_args(argv)
 
     try:
@@ -171,7 +173,33 @@ def diagnose_main(argv: list[str] | None = None) -> int:
     except ParamError:
         print("(no reference parameters available for comparison)")
 
-    return 1 if warnings else 0
+    print()
+    failed = _diagnose_feasibility(params, args.urdf, args.ee_frame)
+    return 1 if warnings or failed else 0
+
+
+def _diagnose_feasibility(params: ArmParams, urdf: str | None, ee_frame: str) -> bool:
+    """Print the physical-feasibility section; True if a check FAILs."""
+    print("physical feasibility of inertial_overrides")
+    if not params.inertial_overrides:
+        print("  none: the URDF's own inertias are used; nothing to audit.")
+        return False
+    if urdf is None:
+        print("  present but not audited: pass --urdf to check them against the link geometry.")
+        return False
+    from .calibration.feasibility import ParamSet, audit
+
+    model = PiperModel(urdf, ee_frame=ee_frame)
+    specs = model.link_specs()
+    try:
+        values = ParamSet.from_inertial_overrides(params.inertial_overrides,
+                                                  [s.name for s in specs])
+    except ValueError as exc:
+        print(f"  error: {exc}")
+        return True
+    report = audit(values, specs)
+    print(report.summary())
+    return bool(report.failures)
 
 
 if __name__ == "__main__":  # pragma: no cover

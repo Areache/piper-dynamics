@@ -83,8 +83,10 @@ class ArmParams:
 
     joints: list[JointParams]
     provenance: Provenance = field(default_factory=Provenance)
-    #: Optional per-link inertial overrides, keyed by URDF link name. Produced
-    #: by `piper-calibrate`; absent means "trust the URDF".
+    #: Optional per-link inertial overrides, keyed by URDF link name: every
+    #: link in `PiperModel.moving_links()`, each ``[m, m*cx, m*cy, m*cz, Ixx,
+    #: Ixy, Iyy, Ixz, Iyz, Izz]`` in SI about the joint frame. Nothing in this
+    #: package writes it yet; absent means "trust the URDF".
     inertial_overrides: dict[str, list[float]] = field(default_factory=dict)
     #: Unit of the `current` field as reported by your SDK, for the record.
     current_unit: str = "A"
