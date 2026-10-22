@@ -16,3 +16,8 @@ params/*.yaml
 *.hdf5
 *.h5
 reports/
+
+# T7/E1 hardware runs, plans and the (non-redistributable) gripper URDF stay out of the repo
+hw_scripts/t7/runs/
+hw_scripts/t7/plans/
+/*.urdf
