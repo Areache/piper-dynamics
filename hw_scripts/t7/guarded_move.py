@@ -41,6 +41,9 @@ How contact is detected (plan version 2, "tip_force"):
      noise come from. Detection is unchanged. The stall backup becomes progress-based (measured speed < 20 % of
      the free-descent speed for 150 ms). --test-stop-mm X declares a fake contact at X mm in free air: use it first,
      to measure how quickly a running move_l is interrupted by the back-off move_j (summary: overshoot_mm).
+  10. Every trial also writes the tip force along the WHOLE descent, F(z): npz keys fz_* and fz_XX.csv
+     (t, phase 0 free / 1 armed / 2 backing off, depth, tip z, commanded depth, F, 0.2 s mean F, phi). The
+     friction baseline from arming is applied back to the first 20 mm, so the free-descent part is included.
 Backup stop (v2.1): if the command runs ahead of the measured position by more than max(3 mm, 3 x the
 free-descent lead) for 80 ms, the arm is being held by something: status "stall", back off. This is a
 position (a - q) criterion, kept only as a safety net and logged so current and position can be compared.
@@ -132,6 +135,32 @@ def tip_force(rl, mu, sd, a, J):
     return F, (1.0 - fit / tot) if tot > 1e-12 else 0.0
 
 
+def full_descent_fz(L, aux, plan, mu, sd, A, J, lp_n, avg_window_s, n_post):
+    """Tip force along the whole descent, F(z), from the logged residuals. The online log has the force only after
+    arming (the free-descent friction mu is known only then); here mu, sd from arming are applied to every row,
+    including the first 20 mm, with the same low-pass, friction scaling (phi) and 0.2 s mean as the online rule.
+    Phases: 0 free descent before arming, 1 armed, 2 after the stop (backing off; phi = 0, approximate)."""
+    n = len(L)
+    step = plan["step_mm"]; zt = np.asarray(plan["tip_z_m"])
+    phi, k = aux[:, 0], np.clip(aux[:, 1].astype(int), 0, len(zt) - 1)
+    t, R = L[:, 0], L[:, 32:38]
+    phase = np.where(L[:, 3] > 0, 1, 0); phase[n - n_post:] = 2
+    F = np.full(n, np.nan)
+    if mu is not None:
+        for i in range(n):
+            rl = np.nanmean(R[max(0, i - lp_n + 1): i + 1], 0)
+            F[i] = tip_force(rl, mu * phi[i], sd, A[k[i]], J)[0]
+    Fm = np.full(n, np.nan)
+    j0 = 0
+    for i in range(n):
+        while t[i] - t[j0] > avg_window_s:
+            j0 += 1
+        if t[i] - t[j0] >= 0.8 * avg_window_s:
+            Fm[i] = np.nanmean(F[j0: i + 1])
+    return {"fz_depth_mm": k * step, "fz_tip_z_mm": zt[k] * 1000.0, "fz_cmd_depth_mm": L[:, 1] * step,
+            "fz_F_N": F, "fz_F_mean_N": Fm, "fz_phi": phi, "fz_phase": phase}
+
+
 def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, log=print, hold_bottom_s=0.0,
             avg_window_s=0.2, floor_N=2.0, detect_joints=(1, 2), motion="stream", test_stop_mm=None,
             max_line_speed=45.0, line_pct=None, restore_pct=None):
@@ -148,6 +177,7 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
     sd_static = np.nanstd(base["current"], 0)
 
     rows, free, recent = [], [], []
+    aux = []                  # per logged row: (phi, measured waypoint) -> full-descent F(z) after the trial
     mu = sd = None
     thr_F = sd_F = None
     t_over = None
@@ -251,6 +281,7 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
                 else:
                     t_lead = None
             rows.append(np.concatenate([[t, k_cmd, k_meas, float(armed), float(hit), Fk, ex, F_avg], q, mp, v, c, r]))
+            aux.append((phi, k_meas))
             if test_stop_mm is not None and s_meas >= test_stop_mm and not (hit or stall):
                 status, k_det, t_det, F_det = "test_stop", k_meas, t, F_avg
                 k_stop = max(0, k_meas - retract_k)
@@ -294,6 +325,7 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
     if k_stop is not None:
         q_hold = [float(x) for x in Q[k_stop]]
     t1 = clock(); k_after = k_max_after = k_meas; last_rs = -1.0
+    n_pre_post = len(rows)
     while clock() - t1 < 1.0:
         t = clock() - t0
         if q_hold is not None and t - last_rs >= 0.1:
@@ -307,17 +339,19 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
         recent.append(r); recent = recent[-lp_n:]
         Fk, ex = (tip_force(np.nanmean(np.array(recent), 0), mu, sd, A[k_meas], J) if mu is not None else (np.nan, np.nan))
         rows.append(np.concatenate([[t, k_cmd, k_meas, float(mu is not None), 0.0, Fk, ex, np.nan], q, mp, v, c, r]))
+        aux.append((0.0, k_after))           # backing off: no friction model for upward motion, phi = 0
         sleep(1.0 / loop_hz)
     if line and line_pct and restore_pct:
         robot.set_speed_percent(restore_pct)          # back to the approach speed for the return to the start
     L = np.array(rows)
+    fz = full_descent_fz(L, np.array(aux, float), plan, mu, sd, A, J, lp_n, avg_window_s, n_post=len(rows) - n_pre_post)
     log_d = {"t": L[:, 0], "k_cmd": L[:, 1], "k_meas": L[:, 2], "armed": L[:, 3], "hit": L[:, 4],
              "tip_force_N": L[:, 5], "explained": L[:, 6], "tip_force_mean_N": L[:, 7],
              "q": L[:, 8:14], "mpos": L[:, 14:20], "v": L[:, 20:26], "current": L[:, 26:32], "resid": L[:, 32:38],
              "i_base": i_base, "sd_static": sd_static, "mu_free": mu if mu is not None else np.full(6, np.nan),
              "sd_free": sd if sd is not None else np.full(6, np.nan),
              "thr_N": np.nan if thr_avg is None else thr_avg, "sd_F_free_N": np.nan if sd_F is None else sd_F,
-             "sd_Fmean_free_N": np.nan if sd_avg is None else sd_avg, "avg_window_s": avg_window_s}
+             "sd_Fmean_free_N": np.nan if sd_avg is None else sd_avg, "avg_window_s": avg_window_s, **fz}
     summ = {"status": status, "k_det": k_det, "t_det_s": t_det,
             "det_depth_mm": None if k_det is None else k_det * step,
             "det_tip_z_m": None if k_det is None else plan["tip_z_m"][k_det],
@@ -400,6 +434,9 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
                                test_stop_mm=a.test_stop_mm,
                                max_line_speed=a.max_line_speed, line_pct=a.line_speed_pct, restore_pct=a.speed_pct)
             np.savez_compressed(out / f"trial_{n:02d}.npz", **log_d)
+            np.savetxt(out / f"fz_{n:02d}.csv", np.c_[log_d["t"], log_d["fz_phase"], log_d["fz_depth_mm"], log_d["fz_tip_z_mm"],
+                                                   log_d["fz_cmd_depth_mm"], log_d["fz_F_N"], log_d["fz_F_mean_N"], log_d["fz_phi"]],
+                       delimiter=",", fmt="%.4f", header="t_s,phase,depth_mm,tip_z_mm,cmd_depth_mm,F_N,F_mean_N,phi", comments="")
             s["trial"] = n
             s["wall_time"] = datetime.now().isoformat(timespec="seconds")
             summary["trials"].append(s)

@@ -64,6 +64,9 @@ or pass `--pyagx`.
   stop is decided (`overshoot_mm`). Use it before any line-mode contact. Trials stop if the overshoot exceeds
   3 mm.
 - The speed cap is raised to 40 mm/s, for a 10/20/40 mm/s comparison on a rigid plate.
+- Every trial writes the tip force along the whole descent, F(z), as `fz_XX.csv` and `fz_*` npz keys: time,
+  phase (0 free / 1 armed / 2 backing off), depth, tip z, commanded depth, F, 0.2 s mean F, phi. The
+  free-descent friction baseline from arming is applied back to the first 20 mm.
 
 ## Safety
 
