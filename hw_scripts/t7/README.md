@@ -58,6 +58,8 @@ or pass `--pyagx`.
     `--speed-pct`. On the right arm, 1 percent is about 4 mm/s.
   - Measured in free air: a stop is decided and the arm is held within 30-40 ms in both modes. Line mode
     overshoots 1.25 mm at 40 mm/s; stream overshoots 0.75 mm at 20 mm/s and 1.5 mm at 40 mm/s.
+- `--motion alt`: trials alternate stream / line within one run, so the two modes see the same drift. Each
+  trial records its `wall_time`.
 - `--test-stop-mm X`: a fake contact at X mm in free air. It measures how far the arm keeps going after a
   stop is decided (`overshoot_mm`). Use it before any line-mode contact. Trials stop if the overshoot exceeds
   3 mm.

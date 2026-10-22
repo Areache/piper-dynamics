@@ -344,7 +344,8 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
     ap.add_argument("--avg-window-s", type=float, default=0.2, help="window of the mean tip force used for the contact rule")
     ap.add_argument("--floor-n", type=float, default=2.0, help="lowest contact threshold on the mean tip force (N)")
     ap.add_argument("--detect-joints", default="2,3", help="joints (1-based) used for the tip force; default j2,j3")
-    ap.add_argument("--motion", choices=["stream", "line"], default="stream", help="stream: move_j every 25 ms (v2.3); line: one move_l")
+    ap.add_argument("--motion", choices=["stream", "line", "alt"], default="stream",
+                    help="stream: move_j every 25 ms (v2.3); line: one move_l; alt: trial 0 stream, 1 line, 2 stream, ...")
     ap.add_argument("--line-speed-pct", type=int, help="line mode: SDK speed percent for the move_l only (the approach and "
                     "the return to the start keep --speed-pct); 1 percent is about 4 mm/s")
     ap.add_argument("--max-line-speed", type=float, default=45.0, help="line mode: stop if the measured speed is above this (mm/s)")
@@ -357,6 +358,8 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
     if plan.get("kind") != "t7_guarded_descent":
         raise SystemExit("not a T7 plan")
     speed = a.speed_mm_s or plan["speed_mm_s"]
+    if a.motion == "alt" and a.line_speed_pct is None:
+        raise SystemExit("--motion alt needs --line-speed-pct (the stream trials use --speed-mm-s)")
     if a.line_speed_pct is not None and not 1 <= a.line_speed_pct <= MAX_SPEED_PCT:
         raise SystemExit(f"--line-speed-pct must be 1..{MAX_SPEED_PCT}")
     if not 0 < speed <= MAX_SPEED_MM_S or not 1 <= a.speed_pct <= MAX_SPEED_PCT:
@@ -393,10 +396,12 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
             log_d, s = descend(robot, plan, speed, clock, sleep, hold_bottom_s=a.hold_at_bottom_s,
                                avg_window_s=a.avg_window_s, floor_N=a.floor_n,
                                detect_joints=tuple(int(x) - 1 for x in a.detect_joints.split(",")),
-                               motion=a.motion, test_stop_mm=a.test_stop_mm,
+                               motion=("stream", "line")[n % 2] if a.motion == "alt" else a.motion,
+                               test_stop_mm=a.test_stop_mm,
                                max_line_speed=a.max_line_speed, line_pct=a.line_speed_pct, restore_pct=a.speed_pct)
             np.savez_compressed(out / f"trial_{n:02d}.npz", **log_d)
             s["trial"] = n
+            s["wall_time"] = datetime.now().isoformat(timespec="seconds")
             summary["trials"].append(s)
             (out / "summary.json").write_text(json.dumps(summary, indent=1))
             print(f"  trial {n}: {s['status']}" + (f" at {s['det_depth_mm']:.2f} mm below start" if s["k_det"] is not None else "")
