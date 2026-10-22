@@ -44,6 +44,14 @@ How contact is detected (plan version 2, "tip_force"):
   10. Every trial also writes the tip force along the WHOLE descent, F(z): npz keys fz_* and fz_XX.csv
      (t, phase 0 free / 1 armed / 2 backing off, depth, tip z, commanded depth, F, 0.2 s mean F, phi). The
      friction baseline from arming is applied back to the first 20 mm, so the free-descent part is included.
+  11. v2.5 (logging only, control identical to v2.4): every cycle also stores the feedback time, the expected
+     gravity current at the current waypoint, the threshold in use and the detector state (0 blind = first
+     20 mm, 1 monitoring, 2 stop decided, 3 backing off, 4 done); every command sent (move_j / move_l) goes to a
+     command log with its send time; motor temperature / status fields are stored if the feedback messages
+     already carry them. After the stop, logging continues until the arm is back at the back-off target and
+     still for 0.5 s (at least 1 s, at most 5 s), so the loading and the unloading branch are both recorded.
+     Each trial also writes trial_XX.json (metadata, field legend). Tip x, y, z are computed offline from q on
+     the server (t7_rays.py): the robot PC has no kinematics library.
 Backup stop (v2.1): if the command runs ahead of the measured position by more than max(3 mm, 3 x the
 free-descent lead) for 80 ms, the arm is being held by something: status "stall", back off. This is a
 position (a - q) criterion, kept only as a safety net and logged so current and position can be compared.
@@ -73,6 +81,16 @@ from pathlib import Path
 import numpy as np
 
 PYAGX_DEFAULT = os.environ.get("PYAGX", "")
+TRIAL_LEGEND = {
+    "state": "0 blind (first 20 mm, friction only), 1 monitoring, 2 stop decided on this row, 3 backing off, 4 done (still)",
+    "cmd_kind": "1 stream move_j, 2 back-off move_j, 3 back-off re-send, 4 hold at bottom, 5 hold after Ctrl-C, 6 move_l",
+    "t": "cycle start (s, monotonic, from the start of the descent)", "t_fb": "feedback received (s, same clock)",
+    "cmd_idx": "index into cmd_* of the last command sent before this row (-1 none)",
+    "k_meas": "waypoint nearest the measured q (frozen at the stop on rows after it, as in v2.4)",
+    "k_now": "waypoint nearest the measured q on every row, including after the stop",
+    "i_grav": "expected gravity current at k_now (A)", "thr_row_N": "contact threshold in use (N, NaN before arming)",
+    "fz_*": "tip force along the whole descent (see full_descent_fz)",
+    "tip_xyz": "not stored: computed from q on the server (t7_rays.py)"}
 MAX_SPEED_MM_S = 40.0
 MAX_SPEED_PCT = 20
 
@@ -91,8 +109,25 @@ def connect(channel, pyagx=PYAGX_DEFAULT):
     return robot
 
 
-def read_state(robot):
-    """q (joint feedback, rad), motor position (rad, same frame as current), velocity (rad/s), current (A)."""
+EXTRA_KEYS = ("temp", "status", "err", "collision", "stall")   # motor fields kept if the messages carry them
+
+
+def _extras(obj, prefix, out):
+    for name in dir(obj):
+        if name.startswith("_") or not any(k in name.lower() for k in EXTRA_KEYS):
+            continue
+        try:
+            val = getattr(obj, name)
+        except Exception:
+            continue
+        if isinstance(val, (bool, int, float, np.integer, np.floating)):
+            out[prefix + name] = float(val)
+
+
+def read_state(robot, extra=None):
+    """q (joint feedback, rad), motor position (rad, same frame as current), velocity (rad/s), current (A).
+    extra (dict): filled with numeric temperature / status fields found on the messages already read, and the
+    message timestamp if it has one; no additional SDK calls."""
     ja = robot.get_joint_angles()
     q = np.asarray(ja.msg, float) if ja is not None else np.full(6, np.nan)
     mp, v, c = np.full(6, np.nan), np.full(6, np.nan), np.full(6, np.nan)
@@ -100,6 +135,13 @@ def read_state(robot):
         ms = robot.get_motor_states(i + 1)
         if ms is not None:
             mp[i], v[i], c[i] = ms.msg.position, ms.msg.velocity, ms.msg.current
+            if extra is not None:
+                _extras(ms.msg, f"m{i + 1}_", extra)
+    if extra is not None and ja is not None:
+        for name in ("timestamp", "time_stamp", "stamp"):
+            val = getattr(ja, name, None)
+            if isinstance(val, (int, float)):
+                extra["fb_stamp"] = float(val)
     return q, mp, v, c
 
 
@@ -178,6 +220,10 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
 
     rows, free, recent = [], [], []
     aux = []                  # per logged row: (phi, measured waypoint) -> full-descent F(z) after the trial
+    ext = []                  # per logged row: t_fb, last command index, state, waypoint now, threshold, i_grav(6)
+    mex = []                  # per logged row: dict of motor extras (may stay empty)
+    cmds = []                 # every command: (t_send, kind, 6 values); kind 1 stream, 2 back-off, 3 re-send,
+                              # 4 hold at bottom, 5 hold after Ctrl-C, 6 move_l (flange pose)
     mu = sd = None
     thr_F = sd_F = None
     t_over = None
@@ -189,6 +235,7 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
     lead_thr = None; t_lead = None; t_stall = None; t_cur = None
     k_cmd, k_meas, last_send = 0, 0, -1.0
     status, k_det, t_det, F_det = "no_contact", None, None, None
+    line_target = None
     speed_ref = speed_mm_s; speeds = []; t5 = None; t_slow = None; k_stop = None; q_hold = None
     line = motion == "line"
     if line:
@@ -199,20 +246,28 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
         target[2] -= max_depth / 1000.0
         line_target = target
     t0 = clock()
+
+    def send_j(qv, kind):
+        robot.move_j(qv)
+        cmds.append((clock() - t0, kind, [float(x) for x in qv]))
+
     timeout = 60.0 if line else max_depth / speed_mm_s + 10.0
     if line:
         if line_pct:
             robot.set_speed_percent(line_pct)          # only the move_l runs at this percent
         robot.move_l(line_target)
+        cmds.append((clock() - t0, 6, [float(x) for x in line_target]))
     try:
         while True:
             t = clock() - t0
             k_want = min(k_max, int(speed_mm_s * t / step))
             if not line and k_want != k_cmd and t - last_send >= 1.0 / send_hz:
                 k_cmd = k_want
-                robot.move_j([float(x) for x in Q[k_cmd]])
+                send_j([float(x) for x in Q[k_cmd]], 1)
                 last_send = t
-            q, mp, v, c = read_state(robot)
+            mx = {}
+            q, mp, v, c = read_state(robot, mx)
+            t_fb = clock() - t0
             if np.all(np.isfinite(q)):
                 lo, hi = max(0, k_meas - 20), min(len(Q), k_meas + 40)
                 k_meas = lo + int(np.argmin(np.abs(Q[lo:hi] - q).max(1)))
@@ -256,7 +311,7 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
                     if line and speed_ref > max_line_speed:
                         status, k_det, t_det = "too_fast", k_meas, t
                         k_stop = max(0, k_meas - retract_k)
-                        robot.move_j([float(x) for x in Q[k_stop]])
+                        send_j([float(x) for x in Q[k_stop]], 2)
                         log(f"    move_l at {speed_ref:.1f} mm/s > {max_line_speed:.0f} mm/s: stopping, lower --speed-pct")
                         break
                     log(f"    armed at {s_meas:.1f} mm: free-descent spread j2 {sd[1]:.3f} A, j3 {sd[2]:.3f} A; "
@@ -282,23 +337,25 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
                     t_lead = None
             rows.append(np.concatenate([[t, k_cmd, k_meas, float(armed), float(hit), Fk, ex, F_avg], q, mp, v, c, r]))
             aux.append((phi, k_meas))
+            ext.append([t_fb, len(cmds) - 1, 1 if armed else 0, k_meas, np.nan if thr_avg is None else thr_avg, *IE[k_meas]])
+            mex.append(mx)
             if test_stop_mm is not None and s_meas >= test_stop_mm and not (hit or stall):
                 status, k_det, t_det, F_det = "test_stop", k_meas, t, F_avg
                 k_stop = max(0, k_meas - retract_k)
-                robot.move_j([float(x) for x in Q[k_stop]])
+                send_j([float(x) for x in Q[k_stop]], 2)
                 break
             if hit or stall:
                 status = "contact" if hit else "stall"
                 k_det, t_det, F_det = k_meas, t, F_avg
                 t_cur, t_stall = (t if hit else None), (t if stall else None)
                 k_stop = max(0, k_meas - retract_k)
-                robot.move_j([float(x) for x in Q[k_stop]])
+                send_j([float(x) for x in Q[k_stop]], 2)
                 break
             if (k_cmd >= k_max or line) and s_meas >= max_depth - step:
                 if np.isfinite(F_avg) and F_avg > 1.0:
                     status, k_det, t_det, F_det = "contact_late", k_meas, t, F_avg
                     k_stop = max(0, k_meas - retract_k)
-                    robot.move_j([float(x) for x in Q[k_stop]])
+                    send_j([float(x) for x in Q[k_stop]], 2)
                     log(f"    max depth reached while pressing (mean tip force {F_avg:.1f} N): backing off")
                     break
                 status = "max_depth"
@@ -306,18 +363,18 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
                     log(f"    reached max depth without contact: holding {hold_bottom_s:.0f} s, MEASURE the remaining tip-to-plate gap now")
                     t_h = clock()
                     while clock() - t_h < hold_bottom_s:
-                        robot.move_j([float(x) for x in Q[k_meas if line else k_cmd]]); sleep(0.05)
+                        send_j([float(x) for x in Q[k_meas if line else k_cmd]], 4); sleep(0.05)
                 break
             if t > timeout:
                 status = "timeout"
                 if line:                      # a running move_l would keep going: hold where we are
                     k_stop = k_meas
-                    robot.move_j([float(x) for x in Q[k_stop]])
+                    send_j([float(x) for x in Q[k_stop]], 2)
                 break
             sleep(1.0 / loop_hz)
     except KeyboardInterrupt:
         q, _, _, _ = read_state(robot)
-        robot.move_j([float(x) for x in q])
+        send_j([float(x) for x in q], 5)
         q_hold = [float(x) for x in q]
         status = "interrupted"
     # keep logging for 1 s after the stop (servo settling, the pressing force decaying); re-send the back-off target
@@ -326,21 +383,44 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
         q_hold = [float(x) for x in Q[k_stop]]
     t1 = clock(); k_after = k_max_after = k_meas; last_rs = -1.0
     n_pre_post = len(rows)
-    while clock() - t1 < 1.0:
+    if ext and status in ("contact", "stall", "test_stop", "contact_late", "too_fast"):
+        ext[-1][2] = 2                                 # the row on which the stop was decided
+    qwin = []                                          # (t, q) over the last 0.5 s, for "still"
+    post_end = "cap"
+    while True:
+        el = clock() - t1
+        if el >= 5.0:
+            break
         t = clock() - t0
         if q_hold is not None and t - last_rs >= 0.1:
             robot.move_j(q_hold); last_rs = t
-        q, mp, v, c = read_state(robot)
+            cmds.append((t, 3, list(q_hold)))
+        mx = {}
+        q, mp, v, c = read_state(robot, mx)
+        t_fb = clock() - t0
         if np.all(np.isfinite(q)):
             lo, hi = max(0, k_after - 20), min(len(Q), k_after + 40)
             k_after = lo + int(np.argmin(np.abs(Q[lo:hi] - q).max(1)))
-            k_max_after = max(k_max_after, k_after)
+            if el < 1.0:                               # overshoot over the first second, as in v2.4
+                k_max_after = max(k_max_after, k_after)
+            qwin.append((t, q.copy())); qwin = [w for w in qwin if t - w[0] <= 0.5]
         r = (c - i_base) - (IE[k_meas] - IE[0])
         recent.append(r); recent = recent[-lp_n:]
         Fk, ex = (tip_force(np.nanmean(np.array(recent), 0), mu, sd, A[k_meas], J) if mu is not None else (np.nan, np.nan))
         rows.append(np.concatenate([[t, k_cmd, k_meas, float(mu is not None), 0.0, Fk, ex, np.nan], q, mp, v, c, r]))
         aux.append((0.0, k_after))           # backing off: no friction model for upward motion, phi = 0
+        ext.append([t_fb, len(cmds) - 1, 3, k_after, np.nan if thr_avg is None else thr_avg, *IE[k_after]])
+        mex.append(mx)
+        reached = k_stop is None or k_after <= k_stop + 1
+        still = (len(qwin) > 5 and t - qwin[0][0] >= 0.45
+                 and float(np.max(np.abs(np.array([w[1] for w in qwin]) - qwin[0][1]))) < 5e-4)
+        if el >= 1.0 and reached and still:
+            post_end = "still"
+            break
         sleep(1.0 / loop_hz)
+    E = np.array(ext, float)
+    if post_end == "still":
+        E[(E[:, 2] == 3) & (E[:, 0] >= E[-1, 0] - 0.5), 2] = 4
     if line and line_pct and restore_pct:
         robot.set_speed_percent(restore_pct)          # back to the approach speed for the return to the start
     L = np.array(rows)
@@ -351,7 +431,14 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
              "i_base": i_base, "sd_static": sd_static, "mu_free": mu if mu is not None else np.full(6, np.nan),
              "sd_free": sd if sd is not None else np.full(6, np.nan),
              "thr_N": np.nan if thr_avg is None else thr_avg, "sd_F_free_N": np.nan if sd_F is None else sd_F,
-             "sd_Fmean_free_N": np.nan if sd_avg is None else sd_avg, "avg_window_s": avg_window_s, **fz}
+             "sd_Fmean_free_N": np.nan if sd_avg is None else sd_avg, "avg_window_s": avg_window_s, **fz,
+             "t_fb": E[:, 0], "cmd_idx": E[:, 1].astype(int), "state": E[:, 2].astype(int), "k_now": E[:, 3].astype(int),
+             "thr_row_N": E[:, 4], "i_grav": E[:, 5:11],
+             "cmd_t": np.array([x[0] for x in cmds]), "cmd_kind": np.array([x[1] for x in cmds], int),
+             "cmd_val": np.array([x[2] for x in cmds]).reshape(-1, 6)}
+    mkeys = sorted({k for d in mex for k in d})
+    for kname in mkeys:
+        log_d["mx_" + kname] = np.array([d.get(kname, np.nan) for d in mex])
     summ = {"status": status, "k_det": k_det, "t_det_s": t_det,
             "det_depth_mm": None if k_det is None else k_det * step,
             "det_tip_z_m": None if k_det is None else plan["tip_z_m"][k_det],
@@ -361,7 +448,11 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
             "motion": motion, "free_speed_mm_s": None if not speeds else float(np.median(speeds)),
             "overshoot_mm": None if k_det is None else max(0.0, (k_max_after - k_det) * step),
             "sd_static_j23_A": [float(sd_static[1]), float(sd_static[2])],
-            "sd_free_j23_A": None if sd is None else [float(sd[1]), float(sd[2])]}
+            "sd_free_j23_A": None if sd is None else [float(sd[1]), float(sd[2])],
+            "version": "2.5", "post_end": post_end,
+            "post_s": float(E[-1, 0] - E[n_pre_post, 0]) if len(E) > n_pre_post else 0.0,
+            "n_rows": int(len(E)), "n_cmds": len(cmds), "motor_extra_fields": mkeys,
+            "line_target_flange": line_target}
     return log_d, summ
 
 
@@ -439,6 +530,7 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
                        delimiter=",", fmt="%.4f", header="t_s,phase,depth_mm,tip_z_mm,cmd_depth_mm,F_N,F_mean_N,phi", comments="")
             s["trial"] = n
             s["wall_time"] = datetime.now().isoformat(timespec="seconds")
+            (out / f"trial_{n:02d}.json").write_text(json.dumps({**s, "plan": Path(a.plan).name, "legend": TRIAL_LEGEND}, indent=1))
             summary["trials"].append(s)
             (out / "summary.json").write_text(json.dumps(summary, indent=1))
             print(f"  trial {n}: {s['status']}" + (f" at {s['det_depth_mm']:.2f} mm below start" if s["k_det"] is not None else "")
