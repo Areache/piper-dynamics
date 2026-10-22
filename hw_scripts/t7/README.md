@@ -46,7 +46,7 @@ or pass `--pyagx`.
   - `stall`: the arm is not advancing.
   - `max_depth`: reached the maximum depth with no contact; holds 15 s so the remaining gap can be measured.
 
-## v2.4 (not yet run on hardware)
+## v2.4 (in-air tests done; contact tests pending)
 
 - `--motion line`: one `move_l` from the start flange pose straight down to the maximum depth, instead of
   streaming `move_j` every 25 ms. The streamed motion is a ~5 Hz stop-and-go, with a line at 4.7 Hz in the j2
@@ -54,6 +54,10 @@ or pass `--pyagx`.
   - The speed is set by `--speed-pct` and measured during the free descent. The trial stops (`too_fast`) above
     `--max-line-speed`.
   - After a contact, a `move_j` back-off interrupts the `move_l` and is re-sent for 1 s.
+  - `--line-speed-pct` sets the percent for the `move_l` only. The approach and the return to the start keep
+    `--speed-pct`. On the right arm, 1 percent is about 4 mm/s.
+  - Measured in free air: a stop is decided and the arm is held within 30-40 ms in both modes. Line mode
+    overshoots 1.25 mm at 40 mm/s; stream overshoots 0.75 mm at 20 mm/s and 1.5 mm at 40 mm/s.
 - `--test-stop-mm X`: a fake contact at X mm in free air. It measures how far the arm keeps going after a
   stop is decided (`overshoot_mm`). Use it before any line-mode contact. Trials stop if the overshoot exceeds
   3 mm.

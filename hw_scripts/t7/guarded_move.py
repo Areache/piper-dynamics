@@ -134,7 +134,7 @@ def tip_force(rl, mu, sd, a, J):
 
 def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, log=print, hold_bottom_s=0.0,
             avg_window_s=0.2, floor_N=2.0, detect_joints=(1, 2), motion="stream", test_stop_mm=None,
-            max_line_speed=45.0):
+            max_line_speed=45.0, line_pct=None, restore_pct=None):
     if plan.get("version", 1) < 2 or plan["detect"].get("mode") != "tip_force":
         raise SystemExit("plan is version 1 (single-joint thresholds, false-triggers on j2 stick-slip): regenerate it with t7_plan.py")
     Q = np.asarray(plan["q"]); IE = np.asarray(plan["i_expected_A"]); A = np.asarray(plan["di_per_N_up"]); step = plan["step_mm"]
@@ -171,6 +171,8 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
     t0 = clock()
     timeout = 60.0 if line else max_depth / speed_mm_s + 10.0
     if line:
+        if line_pct:
+            robot.set_speed_percent(line_pct)          # only the move_l runs at this percent
         robot.move_l(line_target)
     try:
         while True:
@@ -306,6 +308,8 @@ def descend(robot, plan, speed_mm_s, clock, sleep, loop_hz=100.0, send_hz=50.0, 
         Fk, ex = (tip_force(np.nanmean(np.array(recent), 0), mu, sd, A[k_meas], J) if mu is not None else (np.nan, np.nan))
         rows.append(np.concatenate([[t, k_cmd, k_meas, float(mu is not None), 0.0, Fk, ex, np.nan], q, mp, v, c, r]))
         sleep(1.0 / loop_hz)
+    if line and line_pct and restore_pct:
+        robot.set_speed_percent(restore_pct)          # back to the approach speed for the return to the start
     L = np.array(rows)
     log_d = {"t": L[:, 0], "k_cmd": L[:, 1], "k_meas": L[:, 2], "armed": L[:, 3], "hit": L[:, 4],
              "tip_force_N": L[:, 5], "explained": L[:, 6], "tip_force_mean_N": L[:, 7],
@@ -341,6 +345,8 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
     ap.add_argument("--floor-n", type=float, default=2.0, help="lowest contact threshold on the mean tip force (N)")
     ap.add_argument("--detect-joints", default="2,3", help="joints (1-based) used for the tip force; default j2,j3")
     ap.add_argument("--motion", choices=["stream", "line"], default="stream", help="stream: move_j every 25 ms (v2.3); line: one move_l")
+    ap.add_argument("--line-speed-pct", type=int, help="line mode: SDK speed percent for the move_l only (the approach and "
+                    "the return to the start keep --speed-pct); 1 percent is about 4 mm/s")
     ap.add_argument("--max-line-speed", type=float, default=45.0, help="line mode: stop if the measured speed is above this (mm/s)")
     ap.add_argument("--test-stop-mm", type=float, help="free-air test: declare a fake contact at this depth and back off")
     ap.add_argument("--operator-confirmed", action="store_true")
@@ -351,6 +357,8 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
     if plan.get("kind") != "t7_guarded_descent":
         raise SystemExit("not a T7 plan")
     speed = a.speed_mm_s or plan["speed_mm_s"]
+    if a.line_speed_pct is not None and not 1 <= a.line_speed_pct <= MAX_SPEED_PCT:
+        raise SystemExit(f"--line-speed-pct must be 1..{MAX_SPEED_PCT}")
     if not 0 < speed <= MAX_SPEED_MM_S or not 1 <= a.speed_pct <= MAX_SPEED_PCT:
         raise SystemExit(f"speed must be in (0, {MAX_SPEED_MM_S}] mm/s and speed-pct in [1, {MAX_SPEED_PCT}]")
     if not a.operator_confirmed:
@@ -375,7 +383,7 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
     hov = record_static(robot, 3.0, clock, sleep)
     np.savez_compressed(out / "hover.npz", **hov)
     print(f"  at start; static current spread j2 {np.nanstd(hov['current'][:,1]):.4f} A, j3 {np.nanstd(hov['current'][:,2]):.4f} A")
-    summary = {"plan": Path(a.plan).name, "arm": plan["arm"], "speed_mm_s": speed, "speed_pct": a.speed_pct, "motion": a.motion,
+    summary = {"plan": Path(a.plan).name, "arm": plan["arm"], "speed_mm_s": speed, "speed_pct": a.speed_pct, "motion": a.motion, "line_speed_pct": a.line_speed_pct,
                "test_stop_mm": a.test_stop_mm,
                "started": datetime.now().isoformat(timespec="seconds"), "trials": []}
     if not a.hover_only:
@@ -386,7 +394,7 @@ def main(argv=None, robot=None, clock=time.monotonic, sleep=time.sleep, ask=inpu
                                avg_window_s=a.avg_window_s, floor_N=a.floor_n,
                                detect_joints=tuple(int(x) - 1 for x in a.detect_joints.split(",")),
                                motion=a.motion, test_stop_mm=a.test_stop_mm,
-                               max_line_speed=a.max_line_speed)
+                               max_line_speed=a.max_line_speed, line_pct=a.line_speed_pct, restore_pct=a.speed_pct)
             np.savez_compressed(out / f"trial_{n:02d}.npz", **log_d)
             s["trial"] = n
             summary["trials"].append(s)
