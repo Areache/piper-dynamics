@@ -12,6 +12,9 @@ history are in `.hw/TASKS.md` (T7).
 | `t7_analyze.py` | any | no |
 | `t7_sim.py` | any (pinocchio) | no: a toy simulated arm to check the control flow, not the physics |
 | `t7_rays.py` | any (pinocchio) | no: one record per descent (free-space certificate, first contact, stiffness) |
+| `air_baseline.py` | any (numpy) | no: builds / qualifies the same-path air baseline (v2.6) |
+| `e_plane_analysis.py` | any (numpy) | no: plane / normal-angle analysis of touch points |
+| `test_*.py` | any | no: offline tests (fake / simulated arm) |
 
 ## Pipeline
 
@@ -122,6 +125,69 @@ On the 33 T7 contacts:
   differences).
 - **Loading stiffness**: about 1-2 N/mm.
 - **Unloading branch**: resolvable in only 8/33. On a rigid plate the 4-5 mm back-off takes about 0.09 s.
+
+## v2.5.1-v2.6.4: safety fixes and the same-path air baseline (run on hardware, E1)
+
+**Stop paths (v2.5.1).**
+- Interruption, timeout and protection stops never return to the start or begin another trial. Older
+  versions returned to the start after Ctrl-C or a timeout.
+- A timeout holds the measured pose in both motion modes.
+- An interrupt during the approach, post-stop logging or return is caught and held.
+- Invalid joint feedback triggers the damped emergency stop.
+
+**Feedback gate (v2.5.2).**
+- The script waits for complete, fresh and stable startup feedback before asking for confirmation.
+- Joint feedback far from the planned descent is reported as "depth unknown" instead of being snapped to the
+  nearest waypoint.
+- Background: on the bench the right leader and follower arms once shared one CAN bus, and the feedback
+  alternated between two arms. Keep the follower on its own bus.
+
+**Same-path air baseline (v2.6, opt-in).** The analytic free-descent model fails when a joint reverses
+direction during the descent. That model is a constant friction term from the first 20 mm, scaled by the
+measured speed ratio. On one start pose, j2 reverses about 31 mm into the descent and the model projects a
+~5 N false tip force, even in free air. The baseline replaces the model with an empirical per-path profile:
+- `--air-calibrate`: three complete passes on an empty path. The force estimate is logged but does not stop
+  the descent; position, feedback, stall, speed, timeout and Ctrl-C protections stay active.
+  `--air-clearance-mm` is the operator-confirmed clearance.
+- `air_baseline.py build`: builds a candidate profile.
+  - It uses the descending part only, subtracts each run's free-window offset, takes the median by waypoint
+    and smooths over about 1 mm.
+  - Gaps, duplicates and incomplete runs are rejected.
+  - Coverage is the common measured prefix (v2.6.2).
+  - Feedback may step back by at most 0.5 mm in total and must recover within 100 ms.
+- `--air-baseline <candidate> --air-validate`: one independent empty pass with force stops enabled.
+- `air_baseline.py qualify`: accepts the profile only if, from 3 mm after arming to the end of the descent,
+  the 0.2 s mean force stays within ±1.5 N.
+- Object runs: `--air-baseline <qualified>` (optionally `--max-depth-mm` to cap at a shorter prefix,
+  v2.6.3). The baseline is frozen and only a fixed free-window offset is aligned.
+- Binding: a profile is bound to the plan digest, speed, SDK speed percent and `--baseline-context`.
+  `--baseline-context` is an operator-declared token for one powered session with an unchanged, unloaded,
+  closed gripper; the script cannot detect a power cycle by itself.
+- It is never extrapolated and never adapted online. The back-off branch has no baseline (force = NaN).
+
+**Endpoint rule (v2.6.1, v2.6.4).** Baseline runs end when the final command has been sent, every joint is
+within 0.1° and the nearest-waypoint index lags by ≤ 0.5 mm. Offline qualification uses the same rule. The
+index is a joint-space quantity, not a Cartesian depth measurement.
+
+**Tools.**
+- `t7_record_start.py`: records only complete, stable feedback and keeps the raw samples per pose.
+- `e_plane_analysis.py`: plane fit from touch points. Three-point fits with the fourth point held out,
+  four-point least squares, and the angle between two plane normals; it is not a difference of tilt scalars.
+- Tests: `python -m unittest discover -s hw_scripts/t7 -p "test_*.py"` (44 tests). The stop-path and
+  air-baseline tests need locally generated plan JSONs, since `plans/` is gitignored; without them they skip.
+
+E1 hardware results (right arm, one power-up per session):
+- **Repeatability** at one point: sd 0.1-0.3 mm.
+- **Stacked 30/60/90 mm cubes**: slope 0.984 against the nominal heights (cubes not yet calipered).
+- **Object rims**:
+  - plastic cup: error -0.9 to +0.1 mm;
+  - bowl rim: -2.0 mm.
+- **Tilted board** (4 points 100 mm apart, same gripper orientation, flat vs one side raised):
+  - coplanar to 0.05-0.2 mm;
+  - three-point hold-out errors ≤ 0.8 mm;
+  - normal change 6.32° (95% CI 6.07-6.58°) against a nominal atan(30/240) = 7.13°. The gap most likely
+    comes from the reference geometry (pivot / support spacing).
+- **Drift**: within-session drift is not measured yet.
 
 ## Safety
 
