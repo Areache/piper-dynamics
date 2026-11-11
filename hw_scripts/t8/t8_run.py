@@ -534,7 +534,7 @@ def main(argv=None, robot=None, grip=None, clock=time.monotonic, sleep=time.slee
     p.add_argument("--container-g", type=float, help="weighed empty container (g); required with the container")
     p.add_argument("--speed-pct", type=int, default=GOTO_PCT)
     p.add_argument("--joints", help="excite / sweep: comma-separated joints (1-based); default all in the plan")
-    p.add_argument("--modes", default="pass,stop,pass,stop,pass,stop,pass,stop,pass,stop", help="lift: trial modes in order")
+    p.add_argument("--modes", default=",".join(["pass", "pass", "stop"] * 5), help="lift: trial modes in order (predictions_v2: 10 pass + 5 stop)")
     p.add_argument("--steps", default="0,500,0,500,0", help="comply: grams in the container at each step")
     p.add_argument("--indices", help="comply: pose indices (default all in the plan)")
     p.add_argument("--gauge", default="dial", help="comply: external method (dial / ruler / camera)")

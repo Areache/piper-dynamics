@@ -397,6 +397,52 @@ def p4(segs, M, gain, w):
     return res
 
 
+def p4v2(segs, M, gain, w):
+    """predictions_v2 P4: pass step, stop difference and static read (stop trials, 2 s still after the lift); sigma_m pooled
+    within levels as v1; primary = d'_pass >= 1.5 x both others with one-sided F p < 0.05; secondary = tier from sigma_pass."""
+    reads = {"pass": [], "stop": [], "static": []}
+    for n, s in segs.items():
+        if not n.startswith("lift_") or s.meta.get("status") != "done":
+            continue
+        tr = DIR * KBC * gain * s.i - M.g(s.q)
+        gam = M.gamma(s.q[len(s.q) // 2])
+        mh = np.array([mhat(x, gam, w) for x in tr]) * 1000.0
+        r0 = s.meta["_row0_mono"]
+        for tr_ in s.meta["info"]["trials"]:
+            tl = tr_["t_lift_cmd"] - r0
+            if tr_["mode"] == "pass":
+                pre = (s.t >= tl - 0.3) & (s.t < tl); post = (s.t >= tl + 1.0) & (s.t < tl + tr_["lift_s"] - 0.5)
+                reads["pass"].append((grams(s), float(np.mean(mh[post]) - np.mean(mh[pre]))))
+            else:
+                pre = slice(tr_["pre"]["row0"], tr_["pre"]["row1"]); post = slice(tr_["post"]["row0"], tr_["post"]["row1"])
+                reads["stop"].append((grams(s), float(np.mean(mh[post]) - np.mean(mh[pre]))))
+                reads["static"].append((grams(s), float(np.mean(mh[post]))))
+    if not reads["pass"] or not reads["stop"]:
+        return {"verdict": "no data"}
+    res = {}
+    for k, L in reads.items():
+        z = np.mean([v for g, v in L if g == 0]) if any(g == 0 for g, _ in L) else 0.0
+        err = {}
+        for g, v in L:
+            err.setdefault(g, []).append(v - z - g)
+        sd = float(math.sqrt(np.mean([np.var(v, ddof=1) for v in err.values() if len(v) > 1])))
+        res[k] = {"sigma_m_g": round(sd, 1), "d_prime": round(100.0 / sd, 3), "dof": sum(len(v) - 1 for v in err.values())}
+    a = res["pass"]
+    p_stop = 1.0 - _f_cdf(res["stop"]["sigma_m_g"] ** 2 / a["sigma_m_g"] ** 2, res["stop"]["dof"], a["dof"])
+    p_stat = 1.0 - _f_cdf(res["static"]["sigma_m_g"] ** 2 / a["sigma_m_g"] ** 2, res["static"]["dof"], a["dof"])
+    prim = (a["d_prime"] >= 1.5 * res["stop"]["d_prime"] and a["d_prime"] >= 1.5 * res["static"]["d_prime"]
+            and p_stop < 0.05 and p_stat < 0.05)
+    res["primary"] = {"p_stop": round(p_stop, 4), "p_static": round(p_stat, 4), "verdict": "holds" if prim else "fails"}
+    inside = 1.13 <= a["d_prime"] <= 2.64
+    res["secondary"] = {"inside_sim_bracket": inside,
+                        "tier": ("opt (redraw only at stops)" if a["sigma_m_g"] < 61.0 else "pess (every load change)") if inside
+                        else "outside both tiers"}
+    res["sim_brackets"] = {"static": [0.62, 1.18], "pass": [1.13, 2.64], "stop": [0.50, 1.11]}
+    res["inside"] = {k: bool(lo <= res[k]["d_prime"] <= hi) for k, (lo, hi) in res["sim_brackets"].items()}
+    res["verdict"] = f"primary {res['primary']['verdict']}; secondary {res['secondary']['tier']}"
+    return res
+
+
 def _f_cdf(F, d1, d2, n=200000):
     x = rng.chisquare(d1, n) / d1 / (rng.chisquare(d2, n) / d2)
     return float(np.mean(x <= F))
@@ -520,6 +566,7 @@ def main():
     w = sigma_static(vis, M, gain)
     R["P3"] = p3(vis, M, gain, w)
     R["P4"] = p4(segs, M, gain, w)
+    R["P4v2"] = p4v2(segs, M, gain, w)        # predictions_v2
     # static sigma_m from the 3a visits (per tier, vs the 0 g tier of the same pose / approach)
     st = [v for v in vis if v["seg"].startswith("static_")]
     zero = {(v["pose"], v["approach"]): v for v in st if v["grams"] == 0}
@@ -539,7 +586,7 @@ def main():
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     (out / "results.json").write_text(json.dumps(R, indent=1, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)))
     lines = ["| 预测 | 判定 | 要点 |", "|---|---|---|"]
-    for k in ("P1", "P2", "P3", "P4", "P5", "P6", "P7"):
+    for k in ("P1", "P2", "P3", "P4", "P4v2", "P5", "P6", "P7"):
         v = R[k]
         verdict = v.get("verdict") or v.get("outcome") or "; ".join(f"{kk}: {vv.get('verdict')}" for kk, vv in v.items() if isinstance(vv, dict))
         lines.append(f"| {k} | {verdict} | {json.dumps({kk: vv for kk, vv in v.items() if kk not in ('verdict',)}, ensure_ascii=False, default=str)[:300]} |")
