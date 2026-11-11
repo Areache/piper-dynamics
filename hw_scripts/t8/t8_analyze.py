@@ -567,6 +567,12 @@ def main():
     R["P3"] = p3(vis, M, gain, w)
     R["P4"] = p4(segs, M, gain, w)
     R["P4v2"] = p4v2(segs, M, gain, w)        # predictions_v2
+    _v3 = p4v2(segs, M, gain, w)               # predictions_v3: same rules, brackets from the latency-on simulator
+    if "sim_brackets" in _v3:
+        _v3["sim_brackets"] = {"static": [1.06, 2.11], "pass": [1.13, 2.54], "stop": [0.80, 1.64]}
+        _v3["inside"] = {k: bool(lo <= _v3[k]["d_prime"] <= hi) for k, (lo, hi) in _v3["sim_brackets"].items()}
+        _v3["secondary"]["inside_sim_bracket"] = bool(1.13 <= _v3["pass"]["d_prime"] <= 2.54)
+    R["P4v3"] = _v3
     # static sigma_m from the 3a visits (per tier, vs the 0 g tier of the same pose / approach)
     st = [v for v in vis if v["seg"].startswith("static_")]
     zero = {(v["pose"], v["approach"]): v for v in st if v["grams"] == 0}
@@ -586,7 +592,7 @@ def main():
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     (out / "results.json").write_text(json.dumps(R, indent=1, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)))
     lines = ["| 预测 | 判定 | 要点 |", "|---|---|---|"]
-    for k in ("P1", "P2", "P3", "P4", "P4v2", "P5", "P6", "P7"):
+    for k in ("P1", "P2", "P3", "P4", "P4v2", "P4v3", "P5", "P6", "P7"):
         v = R[k]
         verdict = v.get("verdict") or v.get("outcome") or "; ".join(f"{kk}: {vv.get('verdict')}" for kk, vv in v.items() if isinstance(vv, dict))
         lines.append(f"| {k} | {verdict} | {json.dumps({kk: vv for kk, vv in v.items() if kk not in ('verdict',)}, ensure_ascii=False, default=str)[:300]} |")
