@@ -7,6 +7,9 @@ width / force, each with time.monotonic() and time.time(). Temperatures come fro
 every CAN frame from `candump -L` (both listen-only, started by the operator before the first segment).
 
 Segments (task board T8, in session order):
+  limits   read-only query of the firmware joint limits (no motion; master arm unplugged)
+  speedcal percent -> joint speed mapping (one move_j of +-10 deg per percent 1/2/5/10/20, j1..j5) and +-0.5 / +-2 deg
+           steps on j2, j3, for the actuator model (delay, step response)
   anchor   empty gripper, plan anchor pose, settle, record 3 s (drift anchor; run at start, after sweeps,
            after holds, at the end)
   tap      close the gripper, operator taps it 3 times ~2 s apart, open again (start and end of each excite)
@@ -60,7 +63,8 @@ GOTO_TOL = 0.004          # rad, final approach tolerance (0.23 deg)
 VTOL = 0.01               # rad/s
 GRIP_OPEN_M = 0.07
 COLS = (["t_mono", "t_wall", "phase", "cmd"] + [f"q{j}" for j in range(1, 7)] + [f"mpos{j}" for j in range(1, 7)]
-        + [f"v{j}" for j in range(1, 7)] + [f"i{j}" for j in range(1, 7)] + ["grip_m", "grip_N"])
+        + [f"v{j}" for j in range(1, 7)] + [f"i{j}" for j in range(1, 7)] + ["grip_m", "grip_N"]
+        + [f"m{j}_stamp" for j in range(1, 7)])        # motor-state message time stamps (SDK receive time), NaN if absent
 PHASES = {"move": 0, "settle": 1, "record": 2, "sine": 3, "tri": 4, "sweep": 5, "line": 6, "grip": 7, "wait": 8,
           "tap": 9, "operator": 10}
 CMDS = {"none": 0, "move_j": 1, "move_j_stream": 2, "hold": 3}
@@ -95,6 +99,7 @@ class Rec:
         self.rows, self.marks, self.cmds = [], [], []
         self.last_q = None
         self.hist = []            # (t, q) over the last 0.2 s, for a finite-difference joint speed
+        self._next = None
 
     def qdot(self, span=0.15):
         """Joint speed (rad/s) from the joint angles, not from the motor velocity field."""
@@ -104,7 +109,8 @@ class Rec:
         return (h[-1][1] - h[0][1]) / (h[-1][0] - h[0][0])
 
     def tick(self, phase, cmd="none"):
-        q, mp, v, c = gm.read_state(self.robot)
+        ex = {}
+        q, mp, v, c = gm.read_state(self.robot, ex)
         if q.shape != (6,) or not np.isfinite(q).all():
             raise Guard("invalid joint feedback")
         gw = gf = math.nan
@@ -113,12 +119,24 @@ class Rec:
             if gs is not None:
                 gw, gf = float(gs.msg.value), float(gs.msg.force)
         now = self.clock()
-        self.rows.append([now, time.time(), PHASES[phase], CMDS[cmd], *q, *mp, *v, *c, gw, gf])
+        self.rows.append([now, time.time(), PHASES[phase], CMDS[cmd], *q, *mp, *v, *c, gw, gf,
+                          *[ex.get(f"m{j}_stamp", math.nan) for j in range(1, 7)]])
         self.last_q = q
         self.hist.append((now, q))
         while now - self.hist[0][0] > 0.2:
             self.hist.pop(0)
         return q, v, gw
+
+    def pace(self):
+        """Sleep to the next tick of a fixed 1/REC_HZ grid (not a fixed sleep after the work), so the row rate stays at
+        ~REC_HZ even when one read takes a few ms; a late tick re-anchors the grid instead of bursting."""
+        now = self.clock()
+        if self._next is None or now - self._next > 0.05:
+            self._next = now
+        self._next += 1.0 / REC_HZ
+        dt = self._next - now
+        if dt > 0:
+            self.sleep(dt)
 
     def mark(self, text):
         self.marks.append([self.clock(), time.time(), text])
@@ -131,7 +149,7 @@ class Rec:
         t0 = self.clock()
         while self.clock() - t0 < seconds:
             self.tick(phase)
-            self.sleep(1.0 / REC_HZ)
+            self.pace()
 
     def save(self, out, name, meta):
         out.mkdir(parents=True, exist_ok=True)
@@ -145,6 +163,7 @@ class Rec:
 
 
 # ----------------------------------------------------------------------------- motion primitives
+VMAX_FW_DEG_S = 171.9    # firmware max joint speed at 100 % (3.00 rad/s, 11-12 query); speedcal measures the real mapping
 STEP_RAD = 0.17          # long moves are cut into joint-space steps of <= 10 deg (see goto)
 
 
@@ -172,7 +191,7 @@ def _goto_one(rec, target, pct, timeout, resend_hz, tol, still):
             return q
         if rec.clock() - t0 > timeout:
             raise TimeoutError(f"not at target after {timeout:.0f} s: max err {np.degrees(np.max(np.abs(q-target))):.2f} deg")
-        rec.sleep(1.0 / REC_HZ)
+        rec.pace()
 
 
 def settle_record(rec, settle_s, hold_s):
@@ -216,7 +235,7 @@ def single_move(rec, target, pct, joint, vmax, expect_s, resend_hz=0.0, tol=GOTO
             raise TimeoutError(f"single move not done after {rec.clock()-t0:.0f} s (expected {expect_s:.0f} s)")
         if resend_hz > 0 and rec.clock() - last >= 1.0 / resend_hz:
             rec.send(target); last = rec.clock()
-        rec.sleep(1.0 / REC_HZ)
+        rec.pace()
 
 
 def stream_line(rec, Q, step_mm, speed_mm_s, lead_mm=2.0, phase="line", off_rad=0.05):
@@ -247,7 +266,7 @@ def stream_line(rec, Q, step_mm, speed_mm_s, lead_mm=2.0, phase="line", off_rad=
             return rec.clock() - t0
         if rec.clock() - t0 > (n * step_mm / speed_mm_s) * 2.0 + 10.0:
             raise TimeoutError("line not finished in time")
-        rec.sleep(1.0 / REC_HZ)
+        rec.pace()
 
 
 def sine(rec, q0, joint, f, amp, dur, vmax=0.8):
@@ -266,7 +285,7 @@ def sine(rec, q0, joint, f, amp, dur, vmax=0.8):
             raise Guard(f"j{joint+1} speed {abs(rec.qdot()[joint]):.2f} rad/s > {vmax}")
         if np.max(np.abs(q[others] - np.asarray(q0)[others])) > 0.05:
             raise Guard("another joint moved > 0.05 rad during a sine")
-        rec.sleep(1.0 / REC_HZ)
+        rec.pace()
 
 
 # ----------------------------------------------------------------------------- gripper
@@ -293,7 +312,7 @@ def grip_wait_stable(rec, still_s=0.3, tol_m=0.0005, timeout=4.0):
         if win[-1][0] - win[0][0] >= still_s * 0.95 and vals and np.ptp(vals) < tol_m and rec.clock() - t0 > 0.5:
             rec.mark(f"grip stable {vals[-1]:.4f} m")
             return vals[-1]
-        rec.sleep(1.0 / REC_HZ)
+        rec.pace()
     raise Guard("gripper width not stable")
 
 
@@ -302,6 +321,83 @@ def seg_anchor(rec, plan, a, ask):
     goto(rec, plan["anchor"]["q"])
     r = settle_record(rec, 3.0, 3.0)
     return {"anchor": r}
+
+
+def seg_limits(rec, plan, a, ask):
+    """Read-only firmware query (no motion, no enable, no mode change): joint angle / max speed / max acceleration
+    limits via SearchMotorMaxAngleSpdAccLimit. Run with the master arm's CAN unplugged, so only the follower answers
+    (11-12 the j5 speed came back as 3.00 and 2.00 rad/s while both were on the bus). Refuses if the arm is moving."""
+    q0 = rec.tick("wait")[0]
+    rec.wait(2.0)
+    if np.degrees(np.max(np.abs(rec.last_q - q0))) > 0.3:
+        raise Guard("arm is moving: no query sent")
+    out = {}
+    for j in range(1, 7):
+        rec.mark(f"query limits j{j}")
+        av = rec.robot.get_joint_angle_vel_limits(j, timeout=1.5, min_interval=0.0)
+        rec.wait(0.2)
+        ac = rec.robot.get_joint_acc_limits(j, timeout=1.5, min_interval=0.0)
+        rec.wait(0.2)
+        r_ = {}
+        for lab, x in (("vel", av), ("acc", ac)):
+            if x is not None:
+                r_.update({f"{lab}.{k}": float(getattr(x.msg, k)) for k in dir(x.msg)
+                           if not k.startswith("_") and isinstance(getattr(x.msg, k), (int, float))})
+        out[f"j{j}"] = r_
+        print(f"  j{j}: {r_}")
+    j5 = out["j5"].get("vel.max_joint_spd")
+    if j5 is not None and abs(j5 - 3.0) > 0.05:
+        print(f"  NOTE j5 max speed {j5:.2f} rad/s (plan assumes 3.00): use excite triangle pct 15 for j5, see TASKS T8")
+    return {"limits": out}
+
+
+def seg_speedcal(rec, plan, a, ask):
+    """Percent -> joint speed mapping, and small steps for delay / step-response identification. One joint at a time
+    from the excite start pose: ONE move_j of +-amp_deg at each percent (out, through the start to the other side,
+    back), then +-0.5 / +-2 deg steps on j2, j3. Every move_j send time is in cmds; rows carry q / v / current."""
+    S = plan["speedcal"]
+    q0 = np.asarray(S["q0"], float)
+    joints = [int(j) for j in a.joints.split(",")] if a.joints else S["joints"]
+    goto(rec, q0)
+    rec.wait(1.0)
+    table = []
+    for j in joints:
+        k = j - 1
+        for pct in S["pcts"]:
+            nominal = VMAX_FW_DEG_S * pct / 100.0
+            for sgn in (1, -1, 0):
+                tgt = q0.copy()
+                tgt[k] += math.radians(S["amp_deg"]) * sgn
+                i0 = len(rec.rows)
+                rec.mark(f"speedcal j{j} pct{pct} to {sgn:+d}")
+                dist = abs(np.degrees(tgt[k] - rec.last_q[k]))
+                dt = single_move(rec, tgt, pct, k, vmax=math.radians(max(1.5 * nominal + 2.0, 4.0)),
+                                 expect_s=dist / nominal + 1.0, resend_hz=a.resend_hz, phase="move")
+                r_ = np.array(rec.rows[i0:])
+                t, th = r_[:, 0], np.degrees(r_[:, 4 + k])
+                keep = np.r_[True, np.diff(t) > 1e-6]            # drop rows that repeat a time stamp
+                t, th = t[keep], th[keep]
+                v = np.abs(np.diff(th) / np.diff(t)) if len(t) > 10 else np.zeros(1)
+                plateau = float(np.median(v[v > 0.5 * v.max()])) if v.max() > 0 else math.nan
+                table.append({"joint": j, "pct": pct, "dir": sgn, "dist_deg": round(float(dist), 2), "dur_s": round(dt, 3),
+                              "plateau_deg_s": round(plateau, 3), "nominal_deg_s": round(nominal, 3)})
+                rec.wait(S["settle_s"], "settle")
+            print(f"  j{j} {pct:>2d} %: plateau {np.nanmean([x['plateau_deg_s'] for x in table[-3:-1]]):.2f} deg/s "
+                  f"(firmware max x percent {nominal:.2f})")
+    st = S["steps"]
+    for j in [j for j in st["joints"] if j in joints]:
+        k = j - 1
+        for size in st["sizes_deg"]:
+            for rep in range(st["reps"]):
+                for sgn in (1, -1):
+                    tgt = q0.copy()
+                    tgt[k] += math.radians(size) * sgn
+                    rec.mark(f"step j{j} {size}deg {sgn:+d} rep{rep}")
+                    single_move(rec, tgt, st["pct"], k, vmax=1.0, expect_s=2.0, resend_hz=a.resend_hz, phase="move")
+                    rec.wait(st["hold_s"], "record")
+        goto(rec, q0)
+        rec.wait(1.0)
+    return {"speed_table": table}
 
 
 def seg_tap(rec, plan, a, ask):
@@ -487,7 +583,7 @@ def seg_goto(rec, plan, a, ask):
     return {"name": a.name}
 
 
-SEGMENTS = {"anchor": seg_anchor, "tap": seg_tap, "excite": seg_excite, "sweep": seg_sweep, "static": seg_static,
+SEGMENTS = {"limits": seg_limits, "speedcal": seg_speedcal, "anchor": seg_anchor, "tap": seg_tap, "excite": seg_excite, "sweep": seg_sweep, "static": seg_static,
             "lift": seg_lift, "pick": seg_pick, "place": seg_place, "reach": seg_reach, "hold": seg_hold, "comply": seg_comply, "goto": seg_goto}
 NEEDS_CONTAINER = {"static", "reach", "hold", "comply", "pick", "place"}
 
@@ -515,6 +611,12 @@ def describe(plan, seg, a):
         return [f"start {deg(R['Q_out'][0])}", f"end {deg(R['Q_out'][-1])}", f"{R['cycles']} cycles at {R['mm_s']} mm/s"]
     if seg == "anchor":
         return [f"anchor {deg(plan['anchor']['q'])}"]
+    if seg == "limits":
+        return ["read-only firmware query of joint limits (no motion); master arm CAN must be unplugged"]
+    if seg == "speedcal":
+        S = plan["speedcal"]
+        return [f"start {deg(S['q0'])}", f"joints {a.joints or S['joints']}: one move_j of +-{S['amp_deg']} deg at "
+                f"{S['pcts']} %, then +-{S['steps']['sizes_deg']} deg steps on j{S['steps']['joints']} at {S['steps']['pct']} %"]
     if seg in ("pick", "place"):
         L = plan["lift"]
         return [f"pre-grasp {deg(L['q_pre'])}", f"grasp {deg(L['Q_down'][-1])}", f"lift top {deg(L['Q_up'][-1])}"]

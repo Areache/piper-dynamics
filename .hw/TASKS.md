@@ -439,7 +439,9 @@ python hw_scripts/collect_poses.py can_right .hw/results/T3/poses_can_right.json
   - 所有点都要留在 T4 + T5 实际到过的 50 个位姿的包围盒里，外扩 8 cm。
 - 超过 10° 的关节移动会被切成 ≤ 10° 的若干步，沿规划器检查过的直线走。原因是我们不知道固件的 `move_j` 是否让各关节同步到达。
 - 扫描用**单条** `move_j` 加小速度百分比（j2、j3 用 1%，j4、j5 用 2%），由固件插补，避免 T7 流式发送时约 5 Hz 的走停（它会落进波动频带）。
-  - 第一次扫描时请看实测速度（脚本会打印 deg/s）：1% 应该是 1.8–2 °/s，2% 应该是约 4.5 °/s；超过 6 °/s 守护会停。
+  - 固件满速（2026-11-12 只读查询，右臂）：六个关节都是 3.00 rad/s（171.9 °/s），最大加速度 5.00 rad/s²。规划已按此改（原来用的是规格书的 180–225 °/s）。若百分比按满速线性缩放，1% 约 1.72 °/s，2% 约 3.44 °/s；超过 6 °/s 守护会停。实际换算由步骤 0 的 `speedcal` 测出。
+  - 三角波各关节统一 10%（0.3 rad/s）。j5 在主臂接在总线上时应答过两次：3.00 和 2.00 rad/s。如果步骤 0 拔线后复查确认是 2.00 rad/s，j5 的三角波改用 15%：`excite --joints 5` 单独跑一次，需要远程 agent 先改规划。
+  - 关节限位按 URDF 和固件中更紧的那个：j6 用 URDF 的 ±120°，不用固件的 ±170°。
   - 如果固件需要持续发送才动，就加 `--resend-hz 5`。
 - 容器：
   - 选一个带凸缘的杯形容器，夹爪闭合在凸缘下方，让凸缘挂在指上，**不要靠摩擦夹住 0.6 kg**。
@@ -452,7 +454,13 @@ python hw_scripts/collect_poses.py can_right .hw/results/T3/poses_can_right.json
 0. **会话前**：
    - 操作员拔掉右主臂的 CAN 线，确认没有其他控制进程；
    - 开 `lowspd_log.py can_right --out ~/piper_hw_runs/T8_<日期>/lowspd` 和 `candump -L can_right > ~/piper_hw_runs/T8_<日期>/can.log`；
-   - 使能后**立刻**开始步骤 1。
+   - `limits`：只读查询固件的关节限值，不动机、不使能、不切模式，只发 `SearchMotorMaxAngleSpdAccLimit` 查询帧。必须在拔掉主臂 CAN 线之后做，用来复查 j5 的最大速度（11-12 主臂在线时收到 3.00 和 2.00 两个应答）。臂在动时脚本会拒绝查询。
+   - `speedcal`（约 4 min，仿真时长）：从激励起点出发，j1–j5 每次只动一个关节。
+     - 每个关节在 1 / 2 / 5 / 10 / 20% 下各做一次 ±10° 的单条 `move_j`，用编码器测出百分比和实际速度的换算关系；
+     - 然后 j2、j3 在 10% 下做 ±0.5° 和 ±2° 的阶跃，各 3 次，每次保持 2 s。
+     - 每条 `move_j` 的发送时刻都写进 `cmds`；q、v、电流按固定 100 Hz 网格记录（≥ 95 Hz），每行另存电机状态帧的时间戳。`candump` 同时录下指令帧和反馈帧。这些数据给执行器模型做延迟和阶跃响应辨识。
+     - 这一段放在冷机激励之前，会让关节先低速动约 4 min，冷机组因此不再是严格意义上的刚使能。
+   - 然后立刻开始步骤 1。
 1. **冷机**：
    - `anchor`（锚点：空爪，激励起点）；
    - `tap`，操作员轻敲闭合的夹爪 3 次，间隔约 2 s；
@@ -488,9 +496,9 @@ python hw_scripts/collect_poses.py can_right .hw/results/T3/poses_can_right.json
 5. **热机**：`anchor`，再按步骤 1 完全相同地做一遍（`--label hot`），最后做一次 `anchor`。（约 6 min）
 
 **总时长与人工操作**：
-- 仿真运动时间约 66 min。加上称重、换砝码 5 次、装千分表、开场检查，估计 1 h 45 min – 2 h。
+- 仿真运动时间约 81 min（11-12 按固件限值重新规划后；含 `speedcal` 约 6 min、每档 15 次抬起）。加上称重、换砝码 5 次、装千分表、开场检查，估计 2 h – 2 h 15 min。
 - 操作员要做的：
-  - 输入 75 次（`YES` / `y` / 回车 / 读数）；
+  - 输入 77 次（`YES` / `y` / 回车 / 读数）；
   - 敲击 4 组；
   - 换装砝码 5 次；
   - 外部读数 8 次。
@@ -499,6 +507,8 @@ python hw_scripts/collect_poses.py can_right .hw/results/T3/poses_can_right.json
 
 | 段 | 命令 |
 |---|---|
+| 限值查询 | `python t8_run.py limits --plan $P --out $R/limits_fw` |
+| 速度标定 | `python t8_run.py speedcal --plan $P --out $R/speedcal` |
 | 锚点 | `python t8_run.py anchor --plan $P --out $R/anchor_a0` |
 | 敲击 | `python t8_run.py tap --plan $P --out $R/tap_cold_start` |
 | 激励 | `python t8_run.py excite --plan $P --label cold --out $R/excite_cold` |
@@ -530,6 +540,7 @@ python hw_scripts/collect_poses.py can_right .hw/results/T3/poses_can_right.json
 详见 [`results/T8/dryrun.md`](results/T8/dryrun.md)。
 
 - 36 段全部跑完，没有掉落；运动时间 64.8 min，操作员输入 75 次。
+- 11-12 按固件限值重新规划（plan sha `9afb713acd69`）后重跑：38 段全部跑完，运动时间 80.7 min，操作员输入 77 次，停止路径 9/9 通过。见 dryrun.md 的 11-12 一节。
 - 只有扫描时指尖越出工作空间盒外沿 0.3 mm（盒子已外扩 8 cm），其余离桌和盒子检查都通过。
 - 停止路径 9/9 通过。
 - 分析脚本在干跑数据上能跑通：P1 增益恢复到真值的 1–4% 以内；P5 的 R² 为 0.987。

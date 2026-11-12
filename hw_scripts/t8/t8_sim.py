@@ -102,8 +102,9 @@ class SimArm:
         else:
             vlim = np.radians(TP.VMAX_DEG_S) * self.pct / 100.0 * self.speed_scale
             err = self.target - self.q
-            vdes = np.sign(err) * np.minimum(vlim, np.sqrt(2 * 4.0 * np.abs(err)))
-            self.qd += np.clip(vdes - self.qd, -4.0 * h, 4.0 * h)
+            amax = TP.AMAX_RAD_S2
+            vdes = np.sign(err) * np.minimum(vlim, np.sqrt(2 * amax * np.abs(err)))
+            self.qd += np.clip(vdes - self.qd, -amax * h, amax * h)
             self.q = self.q + self.qd * h
             snap = (np.abs(self.target - self.q) < 2e-4) & (np.abs(self.qd) < 0.02)     # servo settles on target
             self.q[snap], self.qd[snap] = self.target[snap], 0.0
@@ -179,6 +180,14 @@ class SimArm:
     def get_joint_angles(self):
         return SimpleNamespace(msg=list(np.round(self.q + self.offset, 5) + self.rng.normal(0, 2e-5, 6)))
 
+    def get_joint_angle_vel_limits(self, j, timeout=1.0, min_interval=1.0):
+        lo, hi = self.geo.m.lowerPositionLimit[j - 1], self.geo.m.upperPositionLimit[j - 1]
+        return SimpleNamespace(msg=SimpleNamespace(joint_index=j, min_angle_limit=float(lo), max_angle_limit=float(hi),
+                                                   max_joint_spd=3.0))
+
+    def get_joint_acc_limits(self, j, timeout=1.0, min_interval=1.0):
+        return SimpleNamespace(msg=SimpleNamespace(joint_index=j, max_joint_acc=TP.AMAX_RAD_S2))
+
     def get_motor_states(self, i):
         c = self._cur[i - 1] + self.rng.normal(0, TRUTH["noise_A"])
         return SimpleNamespace(msg=SimpleNamespace(position=float(self.q[i - 1]), velocity=float(self.qd[i - 1]), current=float(c)))
@@ -201,6 +210,7 @@ def make_ask(sim, log, gauge=True):
 
 
 SESSION = [  # (segment, label, extra argv, content grams or None)
+    ("limits", "fw", [], None), ("speedcal", "", [], None),
     ("anchor", "a0", [], None), ("tap", "cold_start", [], None), ("excite", "cold", [], None), ("tap", "cold_end", [], None),
     ("sweep", "", [], None), ("anchor", "a1", [], None),
 ] + [x for m in (0, 100, 250, 500) for x in (

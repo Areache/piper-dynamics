@@ -31,7 +31,14 @@ import sys  # noqa: E402
 sys.path.insert(0, str(HERE.parent / "t7"))
 from t7_plan import PLATE_Z_MM, T4, URDF, build_model, fk, ik_step_line  # noqa: E402
 
-VMAX_DEG_S = [180.0, 195.0, 180.0, 225.0, 225.0, 225.0]     # AgileX spec at 100 %; the robot side measures the real speed
+# Joint max speed at 100 %, from the firmware (read-only SearchMotorMaxAngleSpdAccLimit query, right arm, 2026-11-12):
+# 3.00 rad/s = 171.9 deg/s on every joint, max acceleration 5.00 rad/s^2. Was the spec sheet (180/195/180/225/225/225).
+# j5 answered twice with 3.00 and 2.00 rad/s while the master arm shared the bus: re-queried at the start of T8 with the
+# master unplugged; if 2.00 holds, j5's triangle percent becomes 15 (see TASKS T8). The percent -> speed mapping itself is
+# measured by the `speedcal` segment.
+VMAX_DEG_S = [171.9] * 6
+AMAX_RAD_S2 = 5.0
+# Joint limits for planning stay the URDF ones (tighter than the firmware's where they differ: j6 +-120 vs +-170 deg).
 TARGET_DEG = {2: (60.0, 140.0), 3: (-135.0, -50.0), 4: (-90.0, 90.0), 5: (-80.0, 15.0)}
 MUST_COVER = {2: (89.3, 96.3), 3: (-72.0, -56.6)}             # the E3 ripple windows (RESULTS_ripple_v1)
 SWEEP_PCT = {2: 1, 3: 1, 4: 2, 5: 2}
@@ -187,6 +194,9 @@ def main():
     report["excite_candidates"] = [{"pose": i, "min_clear_mm": round(c * 1000, 1), "limit_margin_deg": round(float(np.degrees(m)), 1)}
                                    for i, c, m in rows]
     tri_pct = [int(round(np.degrees(0.3) / (VMAX_DEG_S[j] / 100.0))) for j in range(6)]
+    speedcal = {"q0": q_ex.tolist(), "joints": [1, 2, 3, 4, 5], "pcts": [1, 2, 5, 10, 20], "amp_deg": 10.0, "settle_s": 1.0,
+                "steps": {"joints": [2, 3], "sizes_deg": [0.5, 2.0], "reps": 3, "pct": 10, "hold_s": 2.0},
+                "note": "single-joint move_j from the excite start pose (its +-0.19 rad excursions are clearance-checked)"}
     excite = {"start_index": ex_i, "q0": q_ex.tolist(), "joints": [1, 2, 3, 4, 5],
               "sines": [{"f_hz": f, "amp_rad": A, "dur_s": 10.0} for f, A in ((0.5, 0.19), (1.0, 0.10), (2.0, 0.05), (3.0, 0.03))],
               "tri": {"v_rad_s": 0.3, "amp_rad": 0.15, "reversals": 20, "pct": tri_pct, "vmax_rad_s": 0.45}}
@@ -376,7 +386,7 @@ def main():
             "urdf_sha256": hashlib.sha256(Path(URDF).read_bytes()).hexdigest(), "poses_file": Path(a.poses).name,
             "tip_m": a.tip_m, "table_z_m": a.table_z_m, "container": {"h_m": a.container_h_m, "grip_h_m": a.grip_h_m},
             "margins_m": {"tool": mt, "link": ml}, "kt_T4": T4[a.arm]["kt"], "dir_T4": T4[a.arm]["dir"],
-            "anchor": anchor, "excite": excite, "sweeps": sweeps, "static": static, "lift": lift, "reach": reach,
+            "anchor": anchor, "speedcal": speedcal, "excite": excite, "sweeps": sweeps, "static": static, "lift": lift, "reach": reach,
             "hold": hold, "comply": comply,
             "named": {"excite_q0": q_ex.tolist(), "lift_pre": q_pre.tolist(), "lift_top": Q_up[-1].tolist(),
                       "reach_start": Q_out[0].tolist()},
