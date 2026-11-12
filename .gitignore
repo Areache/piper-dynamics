@@ -21,3 +21,5 @@ reports/
 hw_scripts/t7/runs/
 hw_scripts/t7/plans/
 /*.urdf
+hw_scripts/t8/plans/
+hw_scripts/t8/runs/
