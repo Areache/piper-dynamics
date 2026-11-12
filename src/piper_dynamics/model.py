@@ -154,6 +154,19 @@ class PiperModel:
         q = np.asarray(q, dtype=float)
         return pin.computeGeneralizedGravity(self.model, self.data, q).copy()
 
+    def mass_matrix(self, q: np.ndarray) -> np.ndarray:
+        """Joint-space inertia ``M(q)``, ``nv x nv`` (symmetric; Pinocchio's CRBA
+        fills only the upper triangle)."""
+        q = np.asarray(q, dtype=float)
+        M = pin.crba(self.model, self.data, q).copy()
+        return np.triu(M) + np.triu(M, 1).T
+
+    def coriolis_matrix(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
+        """``C(q,v)`` with ``C v`` the Coriolis/centrifugal torque and
+        ``Mdot = C + C^T`` (the factorisation the momentum observer needs)."""
+        q, v = (np.asarray(x, dtype=float) for x in (q, v))
+        return pin.computeCoriolisMatrix(self.model, self.data, q, v).copy()
+
     def joint_torque_regressor(
         self, q: np.ndarray, v: np.ndarray, a: np.ndarray
     ) -> np.ndarray:

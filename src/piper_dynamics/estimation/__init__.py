@@ -1,11 +1,13 @@
 """Estimators: the part of the package that turns telemetry into physics."""
 
 from .friction import friction_torque, smooth_sign
+from .momentum import MomentumObserver
 from .payload import PayloadEstimate, estimate_payload_mass, payload_regressor
 from .tau_ext import TauExtEstimator, TauExtResult, current_to_torque, finite_difference_accel
 from .wrench import WrenchResult, wrench_batch, wrench_from_tau_ext
 
 __all__ = [
+    "MomentumObserver",
     "PayloadEstimate",
     "TauExtEstimator",
     "TauExtResult",
